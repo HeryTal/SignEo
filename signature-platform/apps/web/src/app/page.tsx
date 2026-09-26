@@ -24,6 +24,7 @@ export default function Home() {
         <a href="#" className="brand" aria-label="Signeo, accueil"><span className="brand-mark" aria-hidden="true">s.</span>signeo</a>
         <button className="menu-toggle" aria-expanded={menu} aria-controls="navigation" onClick={() => setMenu(!menu)} onKeyDown={e => { if (e.key === "Escape") setMenu(false); }}>{menu ? "Fermer −" : "Menu +"}</button>
         <nav id="navigation" className={menu ? "nav open" : "nav"} aria-label="Navigation principale" onClick={() => setMenu(false)}>
+          <a className="mobile-auth-link" href="/connexion">Se connecter</a><a className="mobile-auth-link" href="/inscription">Créer un espace</a>
           <a href="#plateforme">La plateforme</a><a href="#fonctionnement">Comment ça marche</a><a href="#usages">Pour qui ?</a><a href="#questions">Vos questions</a>
         </nav>
         <a className="button small header-cta" href="#fonctionnement">Découvrir Signeo <Arrow /></a>
@@ -48,7 +49,12 @@ export default function Home() {
           </div>
         </section>
 
-        <div className="ribbon" aria-label="Simple, fluide, humain"><span>Moins de papier</span><b>✳</b><span>Plus de simplicité</span><b>✳</b><span>À votre rythme</span><b>✳</b><span>Place à la suite</span><b>✳</b></div>
+        <div className="ribbon" role="region" aria-label="Simple, fluide, humain">
+          <div className="ribbon-track">
+            <div className="ribbon-group"><span>Moins de papier</span><b>✳</b><span>Plus de simplicité</span><b>✳</b><span>À votre rythme</span><b>✳</b><span>Place à la suite</span><b>✳</b></div>
+            <div className="ribbon-group" aria-hidden="true"><span>Moins de papier</span><b>✳</b><span>Plus de simplicité</span><b>✳</b><span>À votre rythme</span><b>✳</b><span>Place à la suite</span><b>✳</b></div>
+          </div>
+        </div>
 
         <section className="section wrap" id="plateforme">
           <div className="section-heading"><p className="eyebrow">LE BON GESTE, AU BON MOMENT</p><h2>La paperasse s’arrête.<br /><em>Votre projet continue.</em></h2><p>Notre ambition : rendre la signature aussi naturelle<br className="desktop-break" /> qu’une poignée de main.</p></div>
