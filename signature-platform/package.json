@@ -1,0 +1,24 @@
+{
+  "name": "signature-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "apps/api"
+  ],
+  "engines": {
+    "node": ">=22.20.0"
+  },
+  "scripts": {
+    "dev": "concurrently --kill-others -n web,api \"npm run dev:web\" \"npm run dev:api\"",
+    "dev:web": "npm run dev --workspace web",
+    "dev:api": "npm run start:dev --workspace api",
+    "build": "npm run build --workspace api && npm run build --workspace web",
+    "lint": "npm run lint --workspace web && npm run lint --workspace api",
+    "test:api": "npm run test --workspace api",
+    "test:e2e": "npm run test:e2e --workspace api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
