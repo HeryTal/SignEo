@@ -504,6 +504,33 @@
   font-size: 10px;
   line-height: 1.6;
 }
+.signer-header { border-bottom: 3px solid var(--brand-accent, #496b50); }
+.signer-header .brand { display: inline-flex; align-items: center; gap: 10px; }
+.signer-logo { width: 34px; height: 34px; object-fit: contain; border-radius: 5px; }
+.brand-settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, .8fr); gap: 22px; align-items: start; }
+.brand-settings-grid .settings-card { width: 100%; max-width: none; }
+.brand-settings-grid .settings-card h2 { font: 27px var(--serif); margin: 4px 0 12px; }
+.brand-settings-grid .settings-card > p:not(.eyebrow) { color: var(--muted); font-size: 13px; line-height: 1.65; }
+.brand-settings-grid .form-field { margin-top: 20px; }
+.brand-settings-grid input[type="color"] { height: 46px; padding: 5px; cursor: pointer; }
+.brand-preview-header { display: flex; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 3px solid; }
+.brand-preview-header img { width: 42px; height: 42px; object-fit: contain; }
+.brand-preview-header .brand-mark { display: grid; place-items: center; width: 42px; height: 42px; margin: 0; color: white; border-radius: 50%; }
+.brand-preview button { margin: 16px 0; padding: 12px 18px; color: white; border: 0; border-radius: 6px; font-weight: 700; }
+.brand-preview small { display: block; color: var(--muted); line-height: 1.6; }
+.style-settings-title { margin: 28px 0 6px !important; padding-top: 18px; border-top: 1px solid #e7ebe5; }
+.style-control-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: end; margin-top: 14px; }
+.style-control-row input[type="range"] { accent-color: #55774b; }
+.style-signature-preview { margin: 14px 0 20px; padding: 12px 0; border-bottom: 1px solid #dfe5dc; font-style: italic; }
+.field-style-editor { display: grid; gap: 12px; margin: 16px 0; padding: 14px; background: #f7f9f5; border: 1px solid #e2e8df; border-radius: 8px; }
+.field-style-editor > b { font-size: 12px; }
+.field-style-editor .form-field { min-width: 0; }
+.field-style-editor .style-control-row { grid-template-columns: 72px 1fr; }
+.field-style-editor input[type="color"] { width: 100%; height: 38px; padding: 4px; }
+.placed-field-preview > input { color: inherit; font: inherit; }
+.placed-field-preview.field-signature > input,
+.placed-field-preview.field-initials > input { font-style: italic; }
+@media (max-width: 760px) { .brand-settings-grid { grid-template-columns: 1fr; } }
 .signer-message {
   max-width: 600px;
   margin: 14vh auto;
@@ -810,6 +837,97 @@
   font-family: var(--serif);
   font-style: italic;
   font-size: 17px;
+}
+.signer-field-initials input {
+  max-width: 68px;
+  text-align: center;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 18px;
+}
+.field-recipient-select {
+  display: grid;
+  gap: 6px;
+  padding: 12px 16px;
+  color: #53645c;
+  font-size: 11px;
+}
+.field-recipient-select select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #d7dfd6;
+  border-radius: 5px;
+  background: white;
+  color: #263b33;
+}
+.decline-invitation {
+  margin-left: 12px;
+  border: 1px solid #d5dcd3;
+  border-radius: 6px;
+  padding: 12px 16px;
+  background: white;
+  color: #67534f;
+  cursor: pointer;
+}
+.recipient-order-actions {
+  display: grid;
+  gap: 4px;
+}
+.recipient-order-actions button {
+  width: 24px;
+  height: 21px;
+  border: 1px solid #d5ddd2;
+  border-radius: 4px;
+  background: white;
+  color: #52635b;
+  cursor: pointer;
+}
+.recipient-order-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.collection-request-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(170px, 0.8fr) auto 34px;
+  align-items: end;
+  gap: 12px;
+  padding: 14px;
+  margin: 10px 0;
+  border: 1px solid #e0e6dd;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+.collection-request-row .consent-check {
+  margin: 0 0 12px;
+}
+.collection-upload-list {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+}
+.collection-upload-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #e0e6dd;
+  border-radius: 8px;
+  background: white;
+  font-size: 12px;
+}
+.collection-upload-item label {
+  color: #406e31;
+  cursor: pointer;
+}
+.download-collected-file {
+  border: 1px solid #d5ddd2;
+  border-radius: 5px;
+  padding: 8px 10px;
+  background: white;
+  color: #416d28;
+  font-size: 11px;
+  cursor: pointer;
 }
 .signer-choice {
   flex-direction: row;

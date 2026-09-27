@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useState, type CSSProperties } from "react";
 import { useParams } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
@@ -15,6 +15,8 @@ type FieldType =
   | "SIGN_DATE"
   | "SIGNER_NAME"
   | "SIGNER_EMAIL"
+  | "INITIALS"
+  | "READ_ONLY_TEXT"
   | "TEXT"
   | "MENTION"
   | "CHECKBOX"
@@ -27,10 +29,22 @@ type PublicField = {
   y: number;
   label: string;
   options?: string[];
+  fontFamily?: "SANS" | "SERIF" | "MONO" | "SCRIPT";
+  fontSize?: number;
+  fontColor?: string;
 };
+type PublicCollectionRequest = { id: string; label: string; required: boolean };
 type Invitation = {
   recipient: { name: string; email: string; role: string; status: string };
-  envelope: { title: string; message: string };
+  envelope: {
+    title: string;
+    message: string;
+    allowDecline: boolean;
+    expiresAt: string | null;
+    signatureLevel: string;
+    branding: { displayName: string; accentColor: string; logoUrl: string };
+    cryptographicPdfEnabled: boolean;
+  };
   documents: {
     id: string;
     name: string;
@@ -38,6 +52,8 @@ type Invitation = {
     url: string;
     fields: PublicField[];
   }[];
+  collectionRequests: PublicCollectionRequest[];
+  collectionFiles: { requestId: string; name: string }[];
 };
 
 export default function SignerPage() {
@@ -50,6 +66,13 @@ export default function SignerPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [declined, setDeclined] = useState(false);
+  const [uploadedCollections, setUploadedCollections] = useState<
+    Record<string, string>
+  >({});
+  const [uploadingCollection, setUploadingCollection] = useState<string | null>(
+    null,
+  );
   useEffect(() => {
     fetch(`${API}/envelopes/public/${token}`)
       .then(async (response) => {
@@ -60,6 +83,16 @@ export default function SignerPage() {
       .then((payload) => {
         setInvitation(payload);
         setSignatureName(payload.recipient.name);
+        setUploadedCollections(
+          Object.fromEntries(
+            (payload.collectionFiles ?? []).map(
+              (file: { requestId: string; name: string }) => [
+                file.requestId,
+                file.name,
+              ],
+            ),
+          ),
+        );
       })
       .catch((cause: Error) => setError(cause.message))
       .finally(() => setLoading(false));
@@ -86,12 +119,65 @@ export default function SignerPage() {
       setBusy(false);
     }
   }
+  async function decline() {
+    if (
+      !window.confirm(
+        "Refuser cette invitation ? Ce choix sera enregistré dans l’historique.",
+      )
+    )
+      return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/envelopes/public/${token}/decline`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok)
+        throw new Error(
+          payload?.message ?? "Le refus n’a pas pu être enregistré.",
+        );
+      setDeclined(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Erreur inattendue.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function uploadCollection(requestId: string, file?: File) {
+    if (!file) return;
+    setUploadingCollection(requestId);
+    setError("");
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      const response = await fetch(
+        `${API}/envelopes/public/${token}/collections/${requestId}`,
+        { method: "POST", body: data },
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok)
+        throw new Error(
+          payload?.message ?? "Le document n’a pas pu être envoyé.",
+        );
+      setUploadedCollections((current) => ({
+        ...current,
+        [requestId]: payload.name,
+      }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Erreur inattendue.");
+    } finally {
+      setUploadingCollection(null);
+    }
+  }
   const isApprover = invitation?.recipient.role === "APPROVER";
   return (
-    <main className="signer-shell">
-      <header className="signer-header">
+    <main className="signer-shell" style={{ ["--brand-accent" as string]: invitation?.envelope.branding?.accentColor || "#496b50" } as CSSProperties}>
+      <header className="signer-header" style={{ borderBottomColor: invitation?.envelope.branding?.accentColor || undefined }}>
         <Link href="/" className="brand">
-          <span className="brand-mark">s.</span>signeo
+          {invitation?.envelope.branding?.logoUrl ? <img className="signer-logo" src={invitation.envelope.branding.logoUrl} alt="" /> : <span className="brand-mark">s.</span>}{invitation?.envelope.branding?.displayName || "Signeo"}
         </Link>
         <span>
           {isApprover ? "Approbation sécurisée" : "Signature sécurisée"}
@@ -117,6 +203,15 @@ export default function SignerPage() {
             pouvez fermer cette page.
           </p>
         </section>
+      ) : declined ? (
+        <section className="signer-message">
+          <span>↩</span>
+          <p className="eyebrow">REFUS ENREGISTRÉ</p>
+          <h1>Invitation refusée</h1>
+          <p>
+            Le créateur de l’enveloppe retrouvera ce refus dans son historique.
+          </p>
+        </section>
       ) : (
         invitation && (
           <>
@@ -129,6 +224,16 @@ export default function SignerPage() {
                 Bonjour {invitation.recipient.name}.{" "}
                 {invitation.envelope.message}
               </p>
+              {!isApprover && <small>Niveau actuel : {invitation.envelope.signatureLevel === "SIMPLE" ? "signature simple" : invitation.envelope.signatureLevel.toLowerCase()}.</small>}
+              {invitation.envelope.expiresAt && (
+                <small>
+                  À traiter avant le{" "}
+                  {new Date(invitation.envelope.expiresAt).toLocaleDateString(
+                    "fr-FR",
+                  )}
+                  .
+                </small>
+              )}
             </section>
             <section className="signer-documents">
               {invitation.documents.map((doc) => (
@@ -147,6 +252,10 @@ export default function SignerPage() {
                             const style = {
                               left: `${field.x}%`,
                               top: `${field.y}%`,
+                              color: field.fontColor ?? "#24352b",
+                              fontSize: `${field.fontSize ?? 11}px`,
+                              fontFamily: field.fontFamily === "SCRIPT" || field.fontFamily === "SERIF" ? "Georgia, serif" : field.fontFamily === "MONO" ? "monospace" : "Arial, sans-serif",
+                              fontStyle: field.fontFamily === "SCRIPT" ? "italic" : "normal",
                             };
                             const setValue = (value: string) =>
                               setFieldValues((values) => ({
@@ -156,6 +265,16 @@ export default function SignerPage() {
                             const inputClass =
                               "signer-positioned-field signer-field-" +
                               field.type.toLowerCase();
+                            if (field.type === "READ_ONLY_TEXT")
+                              return (
+                                <span
+                                  key={field.id}
+                                  className={inputClass}
+                                  style={style}
+                                >
+                                  {field.label}
+                                </span>
+                              );
                             if (field.type === "SIGN_DATE")
                               return (
                                 <span
@@ -253,6 +372,7 @@ export default function SignerPage() {
                                       ? signatureName
                                       : (fieldValues[field.id] ?? "")
                                   }
+                                  style={{ color: field.fontColor ?? "#24352b", fontSize: `${field.fontSize ?? 11}px`, fontFamily: field.fontFamily === "SCRIPT" || field.fontFamily === "SERIF" ? "Georgia, serif" : field.fontFamily === "MONO" ? "monospace" : "Arial, sans-serif", fontStyle: field.fontFamily === "SCRIPT" ? "italic" : "normal" }}
                                   onChange={(event) => {
                                     if (field.type === "SIGNATURE")
                                       setSignatureName(event.target.value);
@@ -273,6 +393,44 @@ export default function SignerPage() {
                 </article>
               ))}
             </section>
+            {!!invitation.collectionRequests?.length && (
+              <section className="collection-upload-list">
+                <h2>Documents demandés</h2>
+                {invitation.collectionRequests.map((request) => (
+                  <div className="collection-upload-item" key={request.id}>
+                    <span>
+                      <b>{request.label}</b>
+                      <small>
+                        {request.required ? "Obligatoire" : "Facultatif"}
+                        {uploadedCollections[request.id]
+                          ? " · " + uploadedCollections[request.id]
+                          : ""}
+                      </small>
+                    </span>
+                    <label>
+                      {uploadingCollection === request.id
+                        ? "Envoi…"
+                        : uploadedCollections[request.id]
+                          ? "Remplacer"
+                          : "Joindre un fichier"}
+                      <input
+                        type="file"
+                        accept=".pdf,.docx,application/pdf"
+                        hidden
+                        disabled={uploadingCollection === request.id}
+                        onChange={(event) => {
+                          void uploadCollection(
+                            request.id,
+                            event.target.files?.[0],
+                          );
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+                ))}
+              </section>
+            )}
             <form className="signer-form" onSubmit={sign}>
               <p className="eyebrow">
                 {isApprover ? "VOTRE APPROBATION" : "VOTRE SIGNATURE"}
@@ -291,7 +449,10 @@ export default function SignerPage() {
                 />
               </label>
               {!isApprover && (
-                <div className="signature-preview">
+                <div className="signature-preview" style={(() => {
+                  const signatureField = invitation.documents.flatMap((document) => document.fields).find((field) => field.type === "SIGNATURE");
+                  return signatureField ? { color: signatureField.fontColor, fontSize: signatureField.fontSize, fontFamily: signatureField.fontFamily === "SCRIPT" || signatureField.fontFamily === "SERIF" ? "Georgia, serif" : "Arial, sans-serif", fontStyle: signatureField.fontFamily === "SCRIPT" ? "italic" : "normal" } : undefined;
+                })()}>
                   {signatureName || "Votre nom"}
                 </div>
               )}
@@ -308,9 +469,9 @@ export default function SignerPage() {
                 </span>
               </label>
               <p className="prototype-note">
-                Signeo conserve votre décision avec son horodatage dans
-                l’historique de l’enveloppe. Cette version n’appose pas encore
-                de certificat cryptographique dans le fichier PDF.
+                Signeo conserve votre accord et son horodatage. {invitation.envelope.cryptographicPdfEnabled
+                  ? "Après la dernière signature, le PDF sera scellé avec le certificat configuré par l’organisation."
+                  : "Le scellement cryptographique du PDF n’est pas activé : l’organisation doit configurer son certificat serveur (.p12)."}
               </p>
               {error && (
                 <p className="upload-error" role="alert">
@@ -319,6 +480,7 @@ export default function SignerPage() {
               )}
               <button
                 className="envelope-next send-button"
+                style={{ background: "var(--brand-accent)" }}
                 disabled={busy || !consent}
               >
                 {busy
@@ -327,6 +489,16 @@ export default function SignerPage() {
                     ? "Approuver le document →"
                     : "Signer le document →"}
               </button>
+              {invitation.envelope.allowDecline && (
+                <button
+                  type="button"
+                  className="decline-invitation"
+                  disabled={busy}
+                  onClick={decline}
+                >
+                  Refuser l’invitation
+                </button>
+              )}
             </form>
           </>
         )

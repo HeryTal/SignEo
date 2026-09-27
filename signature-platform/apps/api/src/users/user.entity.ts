@@ -1,5 +1,17 @@
 import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 
+export type UserBranding = {
+  displayName: string;
+  accentColor: string;
+  logoUrl: string;
+  textFont: 'SANS' | 'SERIF' | 'MONO';
+  signatureFont: 'SCRIPT' | 'SERIF' | 'SANS';
+  textColor: string;
+  signatureColor: string;
+  textSize: number;
+  signatureSize: number;
+};
+
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid')
@@ -13,6 +25,9 @@ export class User {
 
   @Column({ name: 'password_hash' })
   passwordHash!: string;
+
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  branding!: UserBranding;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

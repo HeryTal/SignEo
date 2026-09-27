@@ -6,6 +6,7 @@ import {
   ChangeEvent,
   DragEvent,
   FormEvent,
+  PointerEvent as ReactPointerEvent,
   useEffect,
   useRef,
   useState,
@@ -19,13 +20,28 @@ const PdfPages = dynamic(() => import("@/app/ui/pdf-pages"), {
   ),
 });
 
-type Recipient = { name: string; email: string; role: "SIGNER" | "APPROVER" };
+type Recipient = {
+  id: string;
+  name: string;
+  email: string;
+  role: "SIGNER" | "APPROVER";
+  signatureLevel: "SIMPLE" | "ADVANCED" | "QUALIFIED";
+  authenticationMethod: "NONE" | "EMAIL_OTP" | "SMS_OTP";
+};
 type DocumentFile = { file: File; previewUrl?: string };
+type CollectionRequestDraft = {
+  id: string;
+  label: string;
+  recipientId: string;
+  required: boolean;
+};
 type FieldType =
   | "SIGNATURE"
   | "SIGN_DATE"
   | "SIGNER_NAME"
   | "SIGNER_EMAIL"
+  | "INITIALS"
+  | "READ_ONLY_TEXT"
   | "TEXT"
   | "MENTION"
   | "CHECKBOX"
@@ -35,6 +51,8 @@ const FIELD_TOOLS: { type: FieldType; label: string; icon: string }[] = [
   { type: "SIGN_DATE", label: "Date de signature", icon: "▦" },
   { type: "SIGNER_NAME", label: "Nom du signataire", icon: "♙" },
   { type: "SIGNER_EMAIL", label: "E-mail du signataire", icon: "✉" },
+  { type: "INITIALS", label: "Paraphes", icon: "AB" },
+  { type: "READ_ONLY_TEXT", label: "Texte en lecture seule", icon: "Tt" },
   { type: "TEXT", label: "Saisie de texte", icon: "Tt" },
   { type: "MENTION", label: "Mention", icon: "❞" },
   { type: "CHECKBOX", label: "Case à cocher", icon: "☑" },
@@ -49,7 +67,12 @@ type PlacedField = {
   y: number;
   label: string;
   options?: string[];
+  recipientId: string;
+  fontFamily: "SANS" | "SERIF" | "MONO" | "SCRIPT";
+  fontSize: number;
+  fontColor: string;
 };
+type StyleDefaults = { textFont: "SANS" | "SERIF" | "MONO"; signatureFont: "SCRIPT" | "SERIF" | "SANS"; textColor: string; signatureColor: string; textSize: number; signatureSize: number };
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 export default function NewEnvelopePage() {
@@ -59,12 +82,24 @@ export default function NewEnvelopePage() {
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
   const [selected, setSelected] = useState(0);
   const [fields, setFields] = useState<PlacedField[]>([]);
+  const [styleDefaults, setStyleDefaults] = useState<StyleDefaults>({ textFont: "SANS", signatureFont: "SCRIPT", textColor: "#24352b", signatureColor: "#315b45", textSize: 11, signatureSize: 22 });
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [placingType, setPlacingType] = useState<FieldType | null>(null);
+  const [selectedRecipientId, setSelectedRecipientId] = useState("recipient-1");
   const [recipients, setRecipients] = useState<Recipient[]>([
-    { name: "", email: "", role: "SIGNER" },
+    { id: "recipient-1", name: "", email: "", role: "SIGNER", signatureLevel: "SIMPLE", authenticationMethod: "NONE" },
   ]);
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
+  const [expiresAt, setExpiresAt] = useState(() => {
+    const value = new Date();
+    value.setMonth(value.getMonth() + 6);
+    return value.toISOString().slice(0, 10);
+  });
+  const [allowDecline, setAllowDecline] = useState(false);
+  const [collectionRequests, setCollectionRequests] = useState<
+    CollectionRequestDraft[]
+  >([]);
   const [step, setStep] = useState<1 | 2>(1);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -87,6 +122,13 @@ export default function NewEnvelopePage() {
       ),
     [],
   );
+  useEffect(() => {
+    const token = localStorage.getItem("signeo_access_token");
+    if (!token) return;
+    fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (response) => { if (response.ok) { const profile = await response.json(); if (profile.branding) setStyleDefaults(profile.branding); } })
+      .catch(() => setError("Les styles enregistrés n’ont pas pu être chargés. Les styles par défaut seront utilisés."));
+  }, []);
 
   function addFiles(fileList: FileList | File[]) {
     setError("");
@@ -112,11 +154,11 @@ export default function NewEnvelopePage() {
           : undefined,
       });
     }
-    if (documents.length + additions.length > 10) {
+    if (documents.length + additions.length > 50) {
       additions.forEach(
         (item) => item.previewUrl && URL.revokeObjectURL(item.previewUrl),
       );
-      setError("Une enveloppe peut contenir jusqu'à 10 documents.");
+      setError("Une enveloppe peut contenir jusqu'à 50 documents.");
       return;
     }
     setDocuments((current) => [...current, ...additions]);
@@ -134,6 +176,15 @@ export default function NewEnvelopePage() {
     addFiles(event.dataTransfer.files);
   }
   function removeDocument(index: number) {
+    setFields((current) =>
+      current
+        .filter((field) => field.documentIndex !== index)
+        .map((field) =>
+          field.documentIndex > index
+            ? { ...field, documentIndex: field.documentIndex - 1 }
+            : field,
+        ),
+    );
     setDocuments((items) => {
       const removed = items[index];
       if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
@@ -142,7 +193,58 @@ export default function NewEnvelopePage() {
       return next;
     });
   }
+  function moveField(
+    event: ReactPointerEvent<HTMLDivElement>,
+    fieldId: string,
+  ) {
+    if ((event.target as HTMLElement).closest("input, button, select")) return;
+    const page = event.currentTarget.closest(".pdf-page-canvas");
+    if (!page) return;
+    event.preventDefault();
+    const bounds = page.getBoundingClientRect();
+    const move = (pointer: PointerEvent) => {
+      setFields((current) =>
+        current.map((field) =>
+          field.id === fieldId
+            ? {
+                ...field,
+                x: Math.max(
+                  1,
+                  Math.min(
+                    90,
+                    field.x + (pointer.movementX / bounds.width) * 100,
+                  ),
+                ),
+                y: Math.max(
+                  2,
+                  Math.min(
+                    95,
+                    field.y + (pointer.movementY / bounds.height) * 100,
+                  ),
+                ),
+              }
+            : field,
+        ),
+      );
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  }
   function updateRecipient(index: number, key: keyof Recipient, value: string) {
+    if (
+      key === "role" &&
+      value === "APPROVER" &&
+      recipients[index].role !== "APPROVER" &&
+      recipients.filter((recipient) => recipient.role === "APPROVER").length >=
+        10
+    ) {
+      setError("Une invitation peut avoir au maximum 10 approbateurs.");
+      return;
+    }
     setRecipients((current) =>
       current.map((recipient, i) =>
         i === index ? { ...recipient, [key]: value } : recipient,
@@ -158,12 +260,20 @@ export default function NewEnvelopePage() {
       {
         id: crypto.randomUUID(),
         type: placingType,
+        recipientId: selectedRecipientId,
         documentIndex: selected,
         pageNumber,
         x: Math.max(1, Math.min(90, x)),
         y: Math.max(2, Math.min(95, y)),
         label:
-          placingType === "MENTION" ? "Mention à saisir" : definition.label,
+          placingType === "MENTION"
+            ? "Mention à saisir"
+            : placingType === "READ_ONLY_TEXT"
+              ? "Texte à afficher"
+              : definition.label,
+        fontFamily: placingType === "SIGNATURE" || placingType === "INITIALS" ? styleDefaults.signatureFont : styleDefaults.textFont,
+        fontSize: placingType === "SIGNATURE" || placingType === "INITIALS" ? styleDefaults.signatureSize : styleDefaults.textSize,
+        fontColor: placingType === "SIGNATURE" || placingType === "INITIALS" ? styleDefaults.signatureColor : styleDefaults.textColor,
         ...(placingType === "RADIO"
           ? { options: ["Option 1", "Option 2"] }
           : {}),
@@ -202,6 +312,21 @@ export default function NewEnvelopePage() {
       documents.forEach(({ file }) => data.append("files", file));
       data.append("title", title);
       data.append("message", message);
+      data.append("expiresAt", expiresAt + "T23:59:59.999Z");
+      data.append("allowDecline", String(allowDecline));
+      data.append(
+        "collectionRequests",
+        JSON.stringify(
+          collectionRequests.map(({ id, label, recipientId, required }) => ({
+            id,
+            label,
+            recipientEmail: recipients.find(
+              (recipient) => recipient.id === recipientId,
+            )?.email,
+            required,
+          })),
+        ),
+      );
       data.append(
         "fields",
         JSON.stringify(
@@ -215,6 +340,10 @@ export default function NewEnvelopePage() {
               y,
               label,
               options,
+              recipientId,
+              fontFamily,
+              fontSize,
+              fontColor,
             }) => ({
               id,
               type,
@@ -224,6 +353,12 @@ export default function NewEnvelopePage() {
               y,
               label,
               options,
+              recipientEmail: recipients.find(
+                (recipient) => recipient.id === recipientId,
+              )?.email,
+              fontFamily,
+              fontSize,
+              fontColor,
             }),
           ),
         ),
@@ -474,8 +609,10 @@ export default function NewEnvelopePage() {
                       <div
                         className={`placed-field-preview field-${field.type.toLowerCase()}`}
                         key={field.id}
-                        style={{ left: `${field.x}%`, top: `${field.y}%` }}
+                        style={{ left: `${field.x}%`, top: `${field.y}%`, color: field.fontColor, fontSize: `${field.fontSize}px`, fontFamily: field.fontFamily === "SCRIPT" || field.fontFamily === "SERIF" ? "Georgia, serif" : field.fontFamily === "MONO" ? "monospace" : "Arial, sans-serif", fontStyle: field.fontFamily === "SCRIPT" ? "italic" : "normal" }}
+                        onPointerDown={(event) => moveField(event, field.id)}
                         onClick={(event) => event.stopPropagation()}
+                        onClickCapture={() => setSelectedFieldId(field.id)}
                       >
                         <span>
                           {
@@ -526,6 +663,23 @@ export default function NewEnvelopePage() {
                 {documents.length} fichier{documents.length > 1 ? "s" : ""}
               </span>
             </div>
+            <label className="field-recipient-select">
+              Champ destiné à
+              <select
+                value={selectedRecipientId}
+                onChange={(event) => setSelectedRecipientId(event.target.value)}
+              >
+                {recipients
+                  .filter((recipient) => recipient.role === "SIGNER")
+                  .map((recipient) => (
+                    <option key={recipient.id} value={recipient.id}>
+                      {recipient.name ||
+                        recipient.email ||
+                        "Signataire " + (recipients.indexOf(recipient) + 1)}
+                    </option>
+                  ))}
+              </select>
+            </label>
             <div className="field-tool-grid">
               {FIELD_TOOLS.map((tool) => (
                 <button
@@ -553,6 +707,18 @@ export default function NewEnvelopePage() {
               champ(s). Choisis un outil puis clique à l’endroit voulu dans le
               document.
             </p>
+            {fields.find((field) => field.id === selectedFieldId) && (() => {
+              const selectedField = fields.find((field) => field.id === selectedFieldId)!;
+              const isSignature = selectedField.type === "SIGNATURE" || selectedField.type === "INITIALS";
+              return <div className="field-style-editor"><b>Style de « {selectedField.label} »</b>
+                <label className="form-field">Police
+                  <select value={selectedField.fontFamily} onChange={(event) => setFields((items) => items.map((field) => field.id === selectedField.id ? { ...field, fontFamily: event.target.value as PlacedField["fontFamily"] } : field))}>
+                    {(isSignature ? ["SCRIPT", "SERIF", "SANS"] : ["SANS", "SERIF", "MONO"]).map((font) => <option key={font} value={font}>{font === "SCRIPT" ? "Italique" : font === "SERIF" ? "Sérif / classique" : font === "MONO" ? "Machine à écrire" : "Sans sérif / moderne"}</option>)}
+                  </select>
+                </label>
+                <div className="style-control-row"><label className="form-field">Couleur<input type="color" value={selectedField.fontColor} onChange={(event) => setFields((items) => items.map((field) => field.id === selectedField.id ? { ...field, fontColor: event.target.value } : field))} /></label><label className="form-field">Taille ({selectedField.fontSize}px)<input type="range" min={isSignature ? 14 : 8} max={isSignature ? 30 : 18} value={selectedField.fontSize} onChange={(event) => setFields((items) => items.map((field) => field.id === selectedField.id ? { ...field, fontSize: Number(event.target.value) } : field))} /></label></div>
+              </div>;
+            })()}
             <button
               className="envelope-next panel-next"
               type="button"
@@ -597,6 +763,131 @@ export default function NewEnvelopePage() {
                 placeholder="Bonjour, merci de consulter et signer ce document."
               />
             </label>
+            <label className="form-field">
+              Date d’expiration (maximum un an)
+              <input
+                type="date"
+                min={new Date().toISOString().slice(0, 10)}
+                max={(() => {
+                  const value = new Date();
+                  value.setFullYear(value.getFullYear() + 1);
+                  return value.toISOString().slice(0, 10);
+                })()}
+                value={expiresAt}
+                onChange={(event) => setExpiresAt(event.target.value)}
+                required
+              />
+            </label>
+            <label className="consent-check">
+              <input
+                type="checkbox"
+                checked={allowDecline}
+                onChange={(event) => setAllowDecline(event.target.checked)}
+              />
+              <span>Autoriser les destinataires à refuser la signature.</span>
+            </label>
+            <div className="settings-section-title">
+              <div>
+                <b>Documents à collecter</b>
+                <small>
+                  Pièces que les signataires doivent joindre avant de signer.
+                </small>
+              </div>
+              <button
+                type="button"
+                disabled={collectionRequests.length >= 10}
+                onClick={() =>
+                  setCollectionRequests((current) => [
+                    ...current,
+                    {
+                      id: crypto.randomUUID(),
+                      label: "",
+                      recipientId:
+                        recipients.find(
+                          (recipient) => recipient.role === "SIGNER",
+                        )?.id ?? "",
+                      required: true,
+                    },
+                  ])
+                }
+              >
+                + Demander un document
+              </button>
+            </div>
+            {collectionRequests.map((request, index) => (
+              <div className="collection-request-row" key={request.id}>
+                <label className="form-field">
+                  Type de document
+                  <input
+                    required
+                    value={request.label}
+                    placeholder="Ex. Justificatif de domicile"
+                    onChange={(event) =>
+                      setCollectionRequests((items) =>
+                        items.map((item) =>
+                          item.id === request.id
+                            ? { ...item, label: event.target.value }
+                            : item,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+                <label className="form-field">
+                  À fournir par
+                  <select
+                    value={request.recipientId}
+                    onChange={(event) =>
+                      setCollectionRequests((items) =>
+                        items.map((item) =>
+                          item.id === request.id
+                            ? { ...item, recipientId: event.target.value }
+                            : item,
+                        ),
+                      )
+                    }
+                  >
+                    {recipients
+                      .filter((recipient) => recipient.role === "SIGNER")
+                      .map((recipient) => (
+                        <option key={recipient.id} value={recipient.id}>
+                          {recipient.name ||
+                            recipient.email ||
+                            "Signataire " + (recipients.indexOf(recipient) + 1)}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label className="consent-check">
+                  <input
+                    type="checkbox"
+                    checked={request.required}
+                    onChange={(event) =>
+                      setCollectionRequests((items) =>
+                        items.map((item) =>
+                          item.id === request.id
+                            ? { ...item, required: event.target.checked }
+                            : item,
+                        ),
+                      )
+                    }
+                  />
+                  <span>Obligatoire</span>
+                </label>
+                <button
+                  type="button"
+                  className="remove-recipient"
+                  aria-label="Retirer le document demandé"
+                  onClick={() =>
+                    setCollectionRequests((items) =>
+                      items.filter((item) => item.id !== request.id),
+                    )
+                  }
+                >
+                  ×
+                </button>
+              </div>
+            ))}
             <div className="settings-section-title">
               <div>
                 <b>Destinataires</b>
@@ -604,10 +895,21 @@ export default function NewEnvelopePage() {
               </div>
               <button
                 type="button"
+                disabled={
+                  recipients.filter((recipient) => recipient.role === "SIGNER")
+                    .length >= 100
+                }
                 onClick={() =>
                   setRecipients((current) => [
                     ...current,
-                    { name: "", email: "", role: "SIGNER" },
+                    {
+                      id: crypto.randomUUID(),
+                      name: "",
+                      email: "",
+                      role: "SIGNER",
+                      signatureLevel: "SIMPLE",
+                      authenticationMethod: "NONE",
+                    },
                   ])
                 }
               >
@@ -617,6 +919,42 @@ export default function NewEnvelopePage() {
             {recipients.map((recipient, index) => (
               <div className="recipient-form-row" key={index}>
                 <span className="recipient-number">{index + 1}</span>
+                <div className="recipient-order-actions">
+                  <button
+                    type="button"
+                    aria-label="Monter le destinataire"
+                    disabled={index === 0}
+                    onClick={() =>
+                      setRecipients((current) => {
+                        const next = [...current];
+                        [next[index - 1], next[index]] = [
+                          next[index],
+                          next[index - 1],
+                        ];
+                        return next;
+                      })
+                    }
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Descendre le destinataire"
+                    disabled={index === recipients.length - 1}
+                    onClick={() =>
+                      setRecipients((current) => {
+                        const next = [...current];
+                        [next[index], next[index + 1]] = [
+                          next[index + 1],
+                          next[index],
+                        ];
+                        return next;
+                      })
+                    }
+                  >
+                    ↓
+                  </button>
+                </div>
                 <label className="form-field">
                   Nom
                   <input
@@ -652,6 +990,22 @@ export default function NewEnvelopePage() {
                     <option value="APPROVER">Approbateur</option>
                   </select>
                 </label>
+                {recipient.role === "SIGNER" && <>
+                  <label className="form-field">Niveau de signature
+                    <select value={recipient.signatureLevel} onChange={(event) => updateRecipient(index, "signatureLevel", event.target.value)}>
+                      <option value="SIMPLE">Simple (disponible)</option>
+                      <option value="ADVANCED" disabled>Avancée (prestataire requis)</option>
+                      <option value="QUALIFIED" disabled>Qualifiée (QTSP requis)</option>
+                    </select>
+                  </label>
+                  <label className="form-field">Vérification du signataire
+                    <select value={recipient.authenticationMethod} onChange={(event) => updateRecipient(index, "authenticationMethod", event.target.value)}>
+                      <option value="NONE">Aucune vérification supplémentaire</option>
+                      <option value="EMAIL_OTP" disabled>Code e-mail (service requis)</option>
+                      <option value="SMS_OTP" disabled>Code SMS (service requis)</option>
+                    </select>
+                  </label>
+                </>}
                 {recipients.length > 1 && (
                   <button
                     className="remove-recipient"

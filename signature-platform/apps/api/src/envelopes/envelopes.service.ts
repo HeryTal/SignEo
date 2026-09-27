@@ -5,19 +5,30 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { DataSource, Repository } from 'typeorm';
 import { User } from '../users/user.entity.js';
 import { AuditEvent } from './audit-event.entity.js';
-import { Envelope, EnvelopeField } from './envelope.entity.js';
+import {
+  Envelope,
+  EnvelopeCollectionRequest,
+  EnvelopeField,
+} from './envelope.entity.js';
 import { EnvelopeDocument } from './envelope-document.entity.js';
 import { Recipient } from './recipient.entity.js';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { pdflibAddPlaceholder } from '@signpdf/placeholder-pdf-lib';
+import { P12Signer } from '@signpdf/signer-p12';
+import { SignPdf } from '@signpdf/signpdf';
+import { SUBFILTER_ETSI_CADES_DETACHED } from '@signpdf/utils';
 
 export type IncomingRecipient = {
   name: string;
   email: string;
   role?: 'SIGNER' | 'APPROVER';
+  signatureLevel?: 'SIMPLE' | 'ADVANCED' | 'QUALIFIED';
+  authenticationMethod?: 'NONE' | 'EMAIL_OTP' | 'SMS_OTP';
 };
 export type UploadedFile = {
   originalname: string;
@@ -26,11 +37,14 @@ export type UploadedFile = {
   buffer: Buffer;
 };
 export type IncomingField = EnvelopeField;
+export type IncomingCollectionRequest = EnvelopeCollectionRequest;
 const FIELD_TYPES = [
   'SIGNATURE',
   'SIGN_DATE',
   'SIGNER_NAME',
   'SIGNER_EMAIL',
+  'INITIALS',
+  'READ_ONLY_TEXT',
   'TEXT',
   'MENTION',
   'CHECKBOX',
@@ -64,14 +78,35 @@ export class EnvelopesService {
     recipientsInput: IncomingRecipient[],
     files: UploadedFile[],
     fields: IncomingField[] = [],
+    expiresAt?: string,
+    allowDecline = false,
+    collectionRequests: IncomingCollectionRequest[] = [],
   ) {
+    const expiration = expiresAt ? new Date(expiresAt) : null;
+    if (
+      expiresAt &&
+      (!expiration ||
+        Number.isNaN(expiration.getTime()) ||
+        expiration.getTime() <= Date.now() ||
+        expiration.getTime() > Date.now() + 366 * 24 * 60 * 60 * 1000)
+    ) {
+      throw new BadRequestException(
+        'La date d’expiration doit être comprise entre aujourd’hui et un an.',
+      );
+    }
     if (!files?.length)
       throw new BadRequestException('Ajoutez au moins un document.');
     if (
       !recipientsInput?.length ||
+      recipientsInput.filter((recipient) => recipient.role !== 'APPROVER')
+        .length > 100 ||
+      recipientsInput.filter((recipient) => recipient.role === 'APPROVER')
+        .length > 10 ||
       !recipientsInput.some((recipient) => recipient.role !== 'APPROVER')
     ) {
-      throw new BadRequestException('Ajoutez au moins un signataire.');
+      throw new BadRequestException(
+        'Ajoutez au moins un signataire. Limites : 100 signataires et 10 approbateurs.',
+      );
     }
     for (const recipient of recipientsInput) {
       if (
@@ -82,6 +117,28 @@ export class EnvelopesService {
           'Chaque destinataire doit avoir un nom et une adresse e-mail valide.',
         );
       }
+    }
+    const signerEmails = recipientsInput
+      .filter((recipient) => recipient.role !== 'APPROVER')
+      .map((recipient) => recipient.email.trim().toLowerCase());
+    if (
+      !Array.isArray(collectionRequests) ||
+      collectionRequests.length > 10 ||
+      collectionRequests.some(
+        (item) =>
+          !item ||
+          typeof item.id !== 'string' ||
+          item.id.length > 80 ||
+          typeof item.label !== 'string' ||
+          !item.label.trim() ||
+          item.label.length > 160 ||
+          !signerEmails.includes(item.recipientEmail?.trim().toLowerCase()) ||
+          typeof item.required !== 'boolean',
+      )
+    ) {
+      throw new BadRequestException(
+        'Vérifiez les documents demandés et leur destinataire (maximum 10).',
+      );
     }
     if (
       !Array.isArray(fields) ||
@@ -106,6 +163,13 @@ export class EnvelopesService {
           field.y > 100 ||
           typeof field.label !== 'string' ||
           field.label.length > 160 ||
+          (field.fontFamily !== undefined && !['SANS', 'SERIF', 'MONO', 'SCRIPT'].includes(field.fontFamily)) ||
+          (field.fontSize !== undefined && (!Number.isInteger(field.fontSize) || field.fontSize < 8 || field.fontSize > 30)) ||
+          (field.fontColor !== undefined && !/^#[\da-f]{6}$/i.test(field.fontColor)) ||
+          (field.recipientEmail !== undefined &&
+            !signerEmails.includes(
+              field.recipientEmail.trim().toLowerCase(),
+            )) ||
           (field.type === 'RADIO' &&
             (!Array.isArray(field.options) ||
               field.options.length < 2 ||
@@ -118,8 +182,39 @@ export class EnvelopesService {
       throw new BadRequestException(
         'Un champ texte contient une position invalide.',
       );
+    const hasPdf = files.some(
+      (file) => extname(file.originalname).toLowerCase() === '.pdf',
+    );
+    if (
+      hasPdf &&
+      (!fields.some((field) => field.type === 'SIGNATURE') ||
+        !fields.some((field) =>
+          [
+            'SIGNATURE',
+            'TEXT',
+            'MENTION',
+            'CHECKBOX',
+            'RADIO',
+            'INITIALS',
+          ].includes(field.type),
+        ))
+    ) {
+      throw new BadRequestException(
+        'Placez au moins une signature et un champ à compléter par un signataire.',
+      );
+    }
 
     const owner = await this.users.findOneByOrFail({ id: ownerId });
+    for (const recipient of recipientsInput) {
+      if (!['SIMPLE', 'ADVANCED', 'QUALIFIED'].includes(recipient.signatureLevel ?? 'SIMPLE'))
+        throw new BadRequestException('Niveau de signature invalide.');
+      if (!['NONE', 'EMAIL_OTP', 'SMS_OTP'].includes(recipient.authenticationMethod ?? 'NONE'))
+        throw new BadRequestException('Méthode d’authentification invalide.');
+      if ((recipient.signatureLevel ?? 'SIMPLE') !== 'SIMPLE')
+        throw new BadRequestException('Les niveaux avancé et qualifié nécessitent un prestataire de confiance. Choisissez SIMPLE jusqu’à sa configuration.');
+      if (recipient.authenticationMethod && recipient.authenticationMethod !== 'NONE')
+        throw new BadRequestException('La vérification OTP nécessite un fournisseur e-mail ou SMS configuré.');
+    }
     await mkdir(this.uploadDirectory, { recursive: true });
     const storedFiles: string[] = [];
     try {
@@ -148,8 +243,20 @@ export class EnvelopesService {
         title: title?.trim() || files[0].originalname.replace(/\.[^.]+$/, ''),
         message: message?.trim() ?? '',
         status: 'DRAFT',
+        expiresAt: expiration,
+        allowDecline,
+        brandSnapshot: {
+          displayName: owner.branding?.displayName?.trim() || 'Signeo',
+          accentColor: /^#[\da-f]{6}$/i.test(owner.branding?.accentColor ?? '') ? owner.branding.accentColor : '#496b50',
+          logoUrl: owner.branding?.logoUrl ?? '',
+        },
+        collectionRequests: collectionRequests.map((item) => ({
+          ...item,
+          label: item.label.trim(),
+          recipientEmail: item.recipientEmail.trim().toLowerCase(),
+        })),
         fields: fields.map(
-          ({ id, type, documentIndex, pageNumber, x, y, label, options }) => ({
+          ({
             id,
             type,
             documentIndex,
@@ -158,6 +265,23 @@ export class EnvelopesService {
             y,
             label,
             options,
+            recipientEmail,
+            fontFamily,
+            fontSize,
+            fontColor,
+          }) => ({
+            id,
+            type,
+            documentIndex,
+            pageNumber,
+            x,
+            y,
+            label,
+            options,
+            recipientEmail: recipientEmail?.trim().toLowerCase(),
+            fontFamily: fontFamily ?? (type === 'SIGNATURE' || type === 'INITIALS' ? owner.branding?.signatureFont : owner.branding?.textFont) ?? (type === 'SIGNATURE' || type === 'INITIALS' ? 'SCRIPT' : 'SANS'),
+            fontSize: fontSize ?? (type === 'SIGNATURE' || type === 'INITIALS' ? owner.branding?.signatureSize : owner.branding?.textSize) ?? (type === 'SIGNATURE' || type === 'INITIALS' ? 22 : 11),
+            fontColor: fontColor ?? (type === 'SIGNATURE' || type === 'INITIALS' ? owner.branding?.signatureColor : owner.branding?.textColor) ?? (type === 'SIGNATURE' || type === 'INITIALS' ? '#315b45' : '#24352b'),
           }),
         ),
         owner,
@@ -170,6 +294,8 @@ export class EnvelopesService {
             signingOrder: index + 1,
             accessToken: randomUUID().replaceAll('-', ''),
             status: 'WAITING',
+            signatureLevel: recipient.signatureLevel ?? 'SIMPLE',
+            authenticationMethod: recipient.authenticationMethod ?? 'NONE',
           }),
         ),
       });
@@ -227,6 +353,10 @@ export class EnvelopesService {
       relations: { documents: true, recipients: true, events: true },
     });
     if (!envelope) throw new NotFoundException('Enveloppe introuvable.');
+    if (envelope.status === 'COMPLETED' && envelope.documents.some((document) => !document.signedStorageName)) {
+      try { await this.createCryptographicallySignedPdfs(envelope); }
+      catch (error) { console.error('PDF cryptographic sealing failed:', error instanceof Error ? error.message : 'Unknown error'); }
+    }
     return {
       ...this.toDto(envelope),
       events: envelope.events.map((event) => ({
@@ -239,8 +369,32 @@ export class EnvelopesService {
     };
   }
 
+  async collectedDocument(
+    ownerId: string,
+    envelopeId: string,
+    recipientId: string,
+    requestId: string,
+  ) {
+    const recipient = await this.recipients.findOne({
+      where: {
+        id: recipientId,
+        envelope: { id: envelopeId, owner: { id: ownerId } },
+      },
+      relations: { envelope: { owner: true } },
+    });
+    if (!recipient) throw new NotFoundException('Document introuvable.');
+    const file = (recipient.collectionFiles ?? []).find(
+      (item) => item.requestId === requestId,
+    );
+    if (!file) throw new NotFoundException('Document collecté introuvable.');
+    return {
+      file,
+      path: join(this.uploadDirectory, file.storageName),
+    };
+  }
+
   async send(ownerId: string, id: string, webOrigin: string) {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const envelope = await manager.getRepository(Envelope).findOne({
         where: { id, owner: { id: ownerId } },
         relations: { documents: true, recipients: true, owner: true },
@@ -274,6 +428,7 @@ export class EnvelopesService {
         })),
       };
     });
+    return result;
   }
 
   async getPublicInvitation(token: string) {
@@ -284,9 +439,18 @@ export class EnvelopesService {
     if (
       !recipient ||
       recipient.envelope.status === 'DRAFT' ||
+      recipient.envelope.status === 'EXPIRED' ||
       ['SIGNED', 'APPROVED'].includes(recipient.status)
     )
       throw new NotFoundException('Invitation introuvable ou déjà traitée.');
+    if (
+      recipient.envelope.expiresAt &&
+      recipient.envelope.expiresAt.getTime() < Date.now()
+    ) {
+      recipient.envelope.status = 'EXPIRED';
+      await this.envelopes.save(recipient.envelope);
+      throw new BadRequestException('Cette invitation a expiré.');
+    }
     return {
       recipient: {
         name: recipient.name,
@@ -299,7 +463,18 @@ export class EnvelopesService {
         title: recipient.envelope.title,
         message: recipient.envelope.message,
         status: recipient.envelope.status,
+        allowDecline: recipient.envelope.allowDecline,
+        expiresAt: recipient.envelope.expiresAt,
+        branding: recipient.envelope.brandSnapshot,
+        signatureLevel: recipient.signatureLevel,
+        cryptographicPdfEnabled: Boolean(process.env.SIGNING_P12_PATH && process.env.SIGNING_P12_PASSWORD),
       },
+      collectionRequests: (recipient.envelope.collectionRequests ?? [])
+        .filter((item) => item.recipientEmail === recipient.email)
+        .map(({ id, label, required }) => ({ id, label, required })),
+      collectionFiles: (recipient.collectionFiles ?? []).map(
+        ({ requestId, originalName }) => ({ requestId, name: originalName }),
+      ),
       documents: recipient.envelope.documents.map(
         (document, documentIndex) => ({
           id: document.id,
@@ -320,11 +495,20 @@ export class EnvelopesService {
                       y: field.y,
                       label: 'Saisie de texte',
                       options: undefined,
+                      recipientEmail: undefined,
+                      fontFamily: 'SANS' as const,
+                      fontSize: 11,
+                      fontColor: '#24352b',
                     }),
                   ),
                 ]
-                  .filter((field) => field.documentIndex === documentIndex)
-                  .map(({ id, type, pageNumber, x, y, label, options }) => ({
+                  .filter(
+                    (field) =>
+                      field.documentIndex === documentIndex &&
+                      (!field.recipientEmail ||
+                        field.recipientEmail === recipient.email),
+                  )
+                  .map(({ id, type, pageNumber, x, y, label, options, fontFamily, fontSize, fontColor }) => ({
                     id,
                     type,
                     pageNumber,
@@ -332,6 +516,9 @@ export class EnvelopesService {
                     y,
                     label,
                     options,
+                    fontFamily,
+                    fontSize,
+                    fontColor,
                   }))
               : [],
         }),
@@ -339,18 +526,85 @@ export class EnvelopesService {
     };
   }
 
+  async uploadCollection(
+    token: string,
+    requestId: string,
+    file?: UploadedFile,
+  ) {
+    const recipient = await this.recipients.findOne({
+      where: { accessToken: token },
+      relations: { envelope: true },
+    });
+    if (
+      !recipient ||
+      recipient.envelope.status === 'DRAFT' ||
+      recipient.envelope.status === 'EXPIRED' ||
+      ['SIGNED', 'APPROVED', 'DECLINED'].includes(recipient.status)
+    ) {
+      throw new NotFoundException('Cette invitation n’est plus disponible.');
+    }
+    const request = (recipient.envelope.collectionRequests ?? []).find(
+      (item) =>
+        item.id === requestId && item.recipientEmail === recipient.email,
+    );
+    if (!request) throw new NotFoundException('Document demandé introuvable.');
+    if (!file) throw new BadRequestException('Sélectionnez un fichier.');
+    this.validateFile(file);
+    const storageName = `${randomUUID()}${extname(file.originalname).toLowerCase()}`;
+    await mkdir(this.uploadDirectory, { recursive: true });
+    await writeFile(join(this.uploadDirectory, storageName), file.buffer, {
+      flag: 'wx',
+    });
+    recipient.collectionFiles = [
+      ...(recipient.collectionFiles ?? []).filter(
+        (item) => item.requestId !== requestId,
+      ),
+      {
+        requestId,
+        originalName: file.originalname.slice(0, 255),
+        storageName,
+        mimeType: file.mimetype,
+        size: file.size,
+        uploadedAt: new Date().toISOString(),
+      },
+    ];
+    await this.recipients.save(recipient);
+    await this.events.save(
+      this.events.create({
+        envelope: recipient.envelope,
+        actor: null,
+        actorEmail: recipient.email,
+        action: 'COLLECTION_DOCUMENT_UPLOADED',
+        details: { requestId, originalName: file.originalname },
+      }),
+    );
+    return { requestId, name: file.originalname, uploaded: true };
+  }
+
   async publicDocument(token: string, documentId: string) {
     const recipient = await this.recipients.findOne({
       where: { accessToken: token },
       relations: { envelope: { documents: true } },
     });
-    if (!recipient || recipient.envelope.status === 'DRAFT')
+    if (
+      !recipient ||
+      recipient.envelope.status === 'DRAFT' ||
+      recipient.envelope.status === 'EXPIRED'
+    )
       throw new NotFoundException('Invitation introuvable.');
     const document = recipient.envelope.documents.find(
       (item) => item.id === documentId,
     );
     if (!document) throw new NotFoundException('Document introuvable.');
     return { document, path: join(this.uploadDirectory, document.storageName) };
+  }
+
+  async signedDocument(ownerId: string, envelopeId: string, documentId: string) {
+    const document = await this.documents.findOne({
+      where: { id: documentId, envelope: { id: envelopeId, owner: { id: ownerId } } },
+    });
+    if (!document?.signedStorageName) throw new NotFoundException('Le PDF signé n’est pas encore disponible. Vérifiez le certificat côté serveur.');
+    return { document, path: join(this.uploadDirectory, document.signedStorageName) };
   }
 
   async sign(
@@ -363,7 +617,7 @@ export class EnvelopesService {
       throw new BadRequestException(
         'Confirmez votre nom et votre accord avant de signer.',
       );
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const recipient = await manager.getRepository(Recipient).findOne({
         where: { accessToken: token },
         relations: { envelope: { recipients: true, documents: true } },
@@ -371,17 +625,47 @@ export class EnvelopesService {
       if (
         !recipient ||
         recipient.envelope.status === 'DRAFT' ||
+        recipient.envelope.status === 'EXPIRED' ||
         ['SIGNED', 'APPROVED'].includes(recipient.status)
       )
         throw new NotFoundException('Invitation introuvable ou déjà traitée.');
-      const envelopeFields = recipient.envelope.fields ?? [];
+      if (
+        recipient.envelope.expiresAt &&
+        recipient.envelope.expiresAt.getTime() < Date.now()
+      ) {
+        recipient.envelope.status = 'EXPIRED';
+        await manager.save(recipient.envelope);
+        throw new BadRequestException('Cette invitation a expiré.');
+      }
+      const envelopeFields = (recipient.envelope.fields ?? []).filter(
+        (field) =>
+          !field.recipientEmail || field.recipientEmail === recipient.email,
+      );
+      const requiredCollections = (
+        recipient.envelope.collectionRequests ?? []
+      ).filter(
+        (item) => item.required && item.recipientEmail === recipient.email,
+      );
+      if (
+        requiredCollections.some(
+          (request) =>
+            !(recipient.collectionFiles ?? []).some(
+              (file) => file.requestId === request.id,
+            ),
+        )
+      ) {
+        throw new BadRequestException(
+          'Téléversez tous les documents demandés avant de continuer.',
+        );
+      }
       const missingField =
         recipient.role === 'SIGNER'
           ? envelopeFields.find((field) => {
               if (
                 field.type === 'SIGN_DATE' ||
                 field.type === 'SIGNER_NAME' ||
-                field.type === 'SIGNER_EMAIL'
+                field.type === 'SIGNER_EMAIL' ||
+                field.type === 'READ_ONLY_TEXT'
               )
                 return false;
               if (field.type === 'CHECKBOX')
@@ -420,6 +704,8 @@ export class EnvelopesService {
           completedFieldValues[field.id] = recipient.name;
         if (field.type === 'SIGNER_EMAIL')
           completedFieldValues[field.id] = recipient.email;
+        if (field.type === 'READ_ONLY_TEXT')
+          completedFieldValues[field.id] = field.label;
       }
       await manager.save(recipient);
       const allCompleted = recipient.envelope.recipients.every((item) =>
@@ -446,7 +732,59 @@ export class EnvelopesService {
       return {
         status: recipient.envelope.status,
         signedAt: recipient.signedAt,
+        envelopeId: recipient.envelope.id,
       };
+    });
+    if (result.status === 'COMPLETED') {
+      const completedEnvelope = await this.envelopes.findOne({
+        where: { id: result.envelopeId },
+        relations: { documents: true, recipients: true },
+      });
+      if (completedEnvelope) {
+        try { await this.createCryptographicallySignedPdfs(completedEnvelope); }
+        catch (error) { console.error('PDF cryptographic sealing failed:', error instanceof Error ? error.message : 'Unknown error'); }
+      }
+    }
+    return result;
+  }
+
+  async decline(token: string, reason: string) {
+    return this.dataSource.transaction(async (manager) => {
+      const recipient = await manager.getRepository(Recipient).findOne({
+        where: { accessToken: token },
+        relations: { envelope: { recipients: true } },
+      });
+      if (
+        !recipient ||
+        recipient.envelope.status === 'DRAFT' ||
+        recipient.envelope.status === 'EXPIRED' ||
+        ['SIGNED', 'APPROVED', 'DECLINED'].includes(recipient.status)
+      ) {
+        throw new NotFoundException('Invitation introuvable ou déjà traitée.');
+      }
+      if (!recipient.envelope.allowDecline) {
+        throw new BadRequestException(
+          'Le refus de signature n’est pas autorisé pour cette invitation.',
+        );
+      }
+      if (
+        recipient.envelope.expiresAt &&
+        recipient.envelope.expiresAt.getTime() < Date.now()
+      ) {
+        throw new BadRequestException('Cette invitation a expiré.');
+      }
+      recipient.status = 'DECLINED';
+      recipient.envelope.status = 'VOIDED';
+      await manager.save(recipient);
+      await manager.save(recipient.envelope);
+      await manager.save(AuditEvent, {
+        envelope: recipient.envelope,
+        actor: null,
+        actorEmail: recipient.email,
+        action: 'SIGNATURE_DECLINED',
+        details: { reason: reason.slice(0, 500) },
+      });
+      return { status: recipient.envelope.status };
     });
   }
 
@@ -475,11 +813,13 @@ export class EnvelopesService {
       message: envelope.message,
       status: envelope.status,
       createdAt: envelope.createdAt,
+      cryptographicPdfEnabled: Boolean(process.env.SIGNING_P12_PATH && process.env.SIGNING_P12_PASSWORD),
       documents: (envelope.documents ?? []).map((document) => ({
         id: document.id,
         name: document.originalName,
         mimeType: document.mimeType,
         size: Number(document.size),
+        signedPdfAvailable: Boolean(document.signedStorageName),
       })),
       fields: envelope.fields ?? [],
       recipients: (envelope.recipients ?? []).map((recipient) => ({
@@ -489,7 +829,71 @@ export class EnvelopesService {
         role: recipient.role,
         status: recipient.status,
         signingOrder: recipient.signingOrder,
+        signatureLevel: recipient.signatureLevel,
+        authenticationMethod: recipient.authenticationMethod,
+        collectionFiles: (recipient.collectionFiles ?? []).map(
+          ({ requestId, originalName, uploadedAt }) => ({
+            requestId,
+            name: originalName,
+            uploadedAt,
+          }),
+        ),
       })),
     };
+  }
+
+  private async createCryptographicallySignedPdfs(envelope: Envelope) {
+    const certPath = process.env.SIGNING_P12_PATH;
+    const certPassword = process.env.SIGNING_P12_PASSWORD;
+    if (!certPath || !certPassword) return;
+    const p12 = await readFile(resolve(certPath));
+    const audit = await this.events.find({
+      where: { envelope: { id: envelope.id }, action: 'DOCUMENT_SIGNED' },
+      order: { createdAt: 'ASC' },
+    });
+    for (const [documentIndex, document] of envelope.documents.entries()) {
+      if (document.signedStorageName) continue;
+      if (!document.mimeType.includes('pdf') && !document.originalName.toLowerCase().endsWith('.pdf')) continue;
+      const source = await readFile(join(this.uploadDirectory, document.storageName));
+      const pdf = await PDFDocument.load(source);
+      const font = await pdf.embedFont(StandardFonts.Helvetica);
+      for (const event of audit) {
+        const values = (event.details?.fieldValues ?? {}) as Record<string, string>;
+        const fields = (envelope.fields ?? []).filter((field) => field.documentIndex === documentIndex);
+        for (const field of fields) {
+          const value = values[field.id];
+          if (!value || field.type === 'CHECKBOX' && value !== 'true') continue;
+          const page = pdf.getPage(field.pageNumber - 1);
+          if (!page) continue;
+          const x = (field.x / 100) * page.getWidth();
+          const y = page.getHeight() - (field.y / 100) * page.getHeight() - 14;
+          const label = field.type === 'CHECKBOX' ? '[x] ' + field.label : value;
+          const family = field.fontFamily ?? 'SANS';
+          const chosenFont = family === 'SCRIPT' ? StandardFonts.TimesRomanItalic : family === 'SERIF' ? StandardFonts.TimesRoman : family === 'MONO' ? StandardFonts.Courier : StandardFonts.Helvetica;
+          const fieldFont = family === 'SANS' ? font : await pdf.embedFont(chosenFont);
+          const hex = field.fontColor ?? '#24352b';
+          const fieldColor = rgb(parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255);
+          page.drawText(label.slice(0, 200), { x, y, size: field.fontSize ?? 11, font: fieldFont, color: fieldColor, maxWidth: page.getWidth() * 0.55 });
+        }
+      }
+      const page = pdf.getPage(0);
+      pdflibAddPlaceholder({
+        pdfDoc: pdf,
+        pdfPage: page,
+        reason: `Signeo - enveloppe ${envelope.id}`,
+        name: process.env.SIGNING_CERT_NAME || envelope.brandSnapshot?.displayName || 'Signeo',
+        location: 'Signature électronique',
+        contactInfo: 'Signature numérique de document',
+        subFilter: SUBFILTER_ETSI_CADES_DETACHED,
+        signatureLength: 16000,
+        widgetRect: [0, 0, 0, 0],
+      });
+      const prepared = Buffer.from(await pdf.save({ useObjectStreams: false }));
+      const signed = await new SignPdf().sign(prepared, new P12Signer(p12, { passphrase: certPassword }));
+      const signedStorageName = `${randomUUID()}-signed.pdf`;
+      await writeFile(join(this.uploadDirectory, signedStorageName), signed, { flag: 'wx' });
+      document.signedStorageName = signedStorageName;
+      await this.documents.save(document);
+    }
   }
 }

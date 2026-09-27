@@ -8,19 +8,21 @@ import {
   Req,
   Res,
   StreamableFile,
+  UploadedFile,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { createReadStream } from 'node:fs';
 import type { Request, Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
-import {
-  EnvelopesService,
+import { EnvelopesService } from './envelopes.service.js';
+import type {
   IncomingRecipient,
   IncomingField,
-  UploadedFile,
+  IncomingCollectionRequest,
+  UploadedFile as UploadedFileData,
 } from './envelopes.service.js';
 
 type AuthenticatedRequest = Request & { user: { sub: string; email: string } };
@@ -88,16 +90,53 @@ export class EnvelopesController {
     return this.envelopes.get(request.user.sub, id);
   }
 
+  @Get('envelopes/:id/collections/:recipientId/:requestId')
+  @UseGuards(JwtAuthGuard)
+  async getCollectedDocument(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Param('recipientId') recipientId: string,
+    @Param('requestId') requestId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const { file, path } = await this.envelopes.collectedDocument(
+      request.user.sub,
+      id,
+      recipientId,
+      requestId,
+    );
+    response.setHeader('Content-Type', file.mimeType);
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(file.originalName)}"`,
+    );
+    return new StreamableFile(createReadStream(path));
+  }
+
+  @Get('envelopes/:id/documents/:documentId/signed')
+  @UseGuards(JwtAuthGuard)
+  async getSignedDocument(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const { document, path } = await this.envelopes.signedDocument(request.user.sub, id, documentId);
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(document.originalName.replace(/\.pdf$/i, '') + '-signe.pdf')}"`);
+    return new StreamableFile(createReadStream(path));
+  }
+
   @Post('envelopes')
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(
-    FilesInterceptor('files', 10, {
-      limits: { fileSize: 50 * 1024 * 1024, files: 10 },
+    FilesInterceptor('files', 50, {
+      limits: { fileSize: 50 * 1024 * 1024, files: 50 },
     }),
   )
   create(
     @Req() request: AuthenticatedRequest,
-    @UploadedFiles() files: UploadedFile[],
+    @UploadedFiles() files: UploadedFileData[],
     @Body()
     body: {
       title?: string;
@@ -105,10 +144,14 @@ export class EnvelopesController {
       recipients?: string;
       fields?: string;
       textFields?: string;
+      expiresAt?: string;
+      allowDecline?: string;
+      collectionRequests?: string;
     },
   ) {
     let recipients: IncomingRecipient[];
     let fields: IncomingField[];
+    let collectionRequests: IncomingCollectionRequest[];
     try {
       recipients = JSON.parse(body.recipients ?? '[]') as IncomingRecipient[];
     } catch {
@@ -121,6 +164,15 @@ export class EnvelopesController {
     } catch {
       throw new BadRequestException('La liste des champs texte est invalide.');
     }
+    try {
+      collectionRequests = JSON.parse(
+        body.collectionRequests ?? '[]',
+      ) as IncomingCollectionRequest[];
+    } catch {
+      throw new BadRequestException(
+        'La liste des documents à collecter est invalide.',
+      );
+    }
     return this.envelopes.create(
       request.user.sub,
       body.title ?? '',
@@ -128,6 +180,9 @@ export class EnvelopesController {
       recipients,
       files ?? [],
       fields,
+      body.expiresAt,
+      body.allowDecline === 'true',
+      collectionRequests,
     );
   }
 
@@ -136,5 +191,22 @@ export class EnvelopesController {
   send(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
     const webOrigin = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
     return this.envelopes.send(request.user.sub, id, webOrigin);
+  }
+
+  @Post('envelopes/public/:token/decline')
+  decline(@Param('token') token: string, @Body() body: { reason?: string }) {
+    return this.envelopes.decline(token, body.reason ?? '');
+  }
+
+  @Post('envelopes/public/:token/collections/:requestId')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }),
+  )
+  uploadCollection(
+    @Param('token') token: string,
+    @Param('requestId') requestId: string,
+    @UploadedFile() file: UploadedFileData,
+  ) {
+    return this.envelopes.uploadCollection(token, requestId, file);
   }
 }

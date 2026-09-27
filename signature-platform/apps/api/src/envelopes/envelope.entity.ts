@@ -12,14 +12,17 @@ import { User } from '../users/user.entity.js';
 import { EnvelopeDocument } from './envelope-document.entity.js';
 import { Recipient } from './recipient.entity.js';
 import { AuditEvent } from './audit-event.entity.js';
+import type { UserBranding } from '../users/user.entity.js';
 
 export type EnvelopeStatus =
-  'DRAFT' | 'SENT' | 'PARTIALLY_SIGNED' | 'COMPLETED' | 'VOIDED';
+  'DRAFT' | 'SENT' | 'PARTIALLY_SIGNED' | 'COMPLETED' | 'VOIDED' | 'EXPIRED';
 export type EnvelopeFieldType =
   | 'SIGNATURE'
   | 'SIGN_DATE'
   | 'SIGNER_NAME'
   | 'SIGNER_EMAIL'
+  | 'INITIALS'
+  | 'READ_ONLY_TEXT'
   | 'TEXT'
   | 'MENTION'
   | 'CHECKBOX'
@@ -33,6 +36,16 @@ export type EnvelopeField = {
   y: number;
   label: string;
   options?: string[];
+  recipientEmail?: string;
+  fontFamily?: 'SANS' | 'SERIF' | 'MONO' | 'SCRIPT';
+  fontSize?: number;
+  fontColor?: string;
+};
+export type EnvelopeCollectionRequest = {
+  id: string;
+  label: string;
+  recipientEmail: string;
+  required: boolean;
 };
 
 @Entity('envelopes')
@@ -42,6 +55,10 @@ export class Envelope {
   @Column({ type: 'text', default: '' }) message!: string;
   @Column({ name: 'fields', type: 'jsonb', default: [] })
   fields!: EnvelopeField[];
+  @Column({ name: 'collection_requests', type: 'jsonb', default: [] })
+  collectionRequests!: EnvelopeCollectionRequest[];
+  @Column({ name: 'brand_snapshot', type: 'jsonb', default: () => "'{}'::jsonb" })
+  brandSnapshot!: UserBranding;
   @Column({ name: 'text_fields', type: 'jsonb', default: [] })
   legacyTextFields!: {
     id: string;
@@ -54,6 +71,8 @@ export class Envelope {
   @Column({ length: 32, default: 'DRAFT' }) status!: EnvelopeStatus;
   @Column({ name: 'expires_at', type: 'timestamptz', nullable: true })
   expiresAt!: Date | null;
+  @Column({ name: 'allow_decline', type: 'boolean', default: false })
+  allowDecline!: boolean;
   @ManyToOne(() => User, { nullable: false, onDelete: 'CASCADE' })
   owner!: Relation<User>;
   @OneToMany(() => EnvelopeDocument, (document) => document.envelope, {
