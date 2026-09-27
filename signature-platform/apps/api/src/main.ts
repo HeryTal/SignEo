@@ -2,7 +2,6 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { config as loadEnvironment } from 'dotenv';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module.js';
 
 const rootEnvironmentFile = resolve(process.cwd(), '../../.env');
 const localEnvironmentFile = resolve(process.cwd(), '.env');
@@ -15,6 +14,10 @@ if (existsSync(environmentFile)) {
   // when PowerShell already has an older DATABASE_PASSWORD in its environment.
   loadEnvironment({ path: environmentFile, override: true });
 }
+
+// Load AppModule only after dotenv has populated process.env. Static imports
+// are evaluated before this file's code runs.
+const { AppModule } = await import('./app.module.js');
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
