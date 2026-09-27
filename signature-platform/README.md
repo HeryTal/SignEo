@@ -1,5 +1,15 @@
 # Plateforme de signature
 
+## PostgreSQL
+
+Copiez `.env.example` en `.env` et remplacez `DATABASE_PASSWORD` par un mot de passe local. Démarrez ensuite la base de données :
+
+```powershell
+docker compose up -d postgres
+```
+
+L’API NestJS utilise PostgreSQL avec TypeORM. En développement, les tables des entités seront créées automatiquement. Pour la production, utilisez des migrations et définissez `NODE_ENV=production`.
+
 Socle indépendant de l'application Expo Izovy, avec deux applications TypeScript :
 
 - `apps/web` : Next.js, App Router et Tailwind CSS, sur http://localhost:3000.
