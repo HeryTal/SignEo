@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { AuthModule } from './auth/auth.module.js';
+import { EnvelopesModule } from './envelopes/envelopes.module.js';
 
 @Module({
   imports: [
@@ -16,6 +18,8 @@ import { AppService } from './app.service.js';
       synchronize: process.env.NODE_ENV !== 'production',
       ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
     }),
+    AuthModule,
+    EnvelopesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -4,6 +4,7 @@ node_modules/
 !.env.example
 **/dist/
 **/coverage/
+apps/api/uploads/
 **/.next/
 *.tsbuildinfo
 *.log
