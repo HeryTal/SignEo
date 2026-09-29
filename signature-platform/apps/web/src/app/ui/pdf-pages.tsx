@@ -12,12 +12,16 @@ type PdfPagesProps = {
   file: string | File;
   renderOverlay?: (pageNumber: number) => ReactNode;
   onPageClick?: (pageNumber: number, x: number, y: number) => void;
+  zoom?: number;
+  onFieldDrop?: (pageNumber: number, x: number, y: number, type: string) => void;
 };
 
 export default function PdfPages({
   file,
   renderOverlay,
   onPageClick,
+  zoom = 100,
+  onFieldDrop,
 }: PdfPagesProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pageCount, setPageCount] = useState(0);
@@ -58,6 +62,13 @@ export default function PdfPages({
                 <div
                   className="pdf-page-canvas"
                   key={pageNumber}
+                  onDragOver={(event) => { if (onFieldDrop) event.preventDefault(); }}
+                  onDrop={(event) => {
+                    if (!onFieldDrop) return;
+                    event.preventDefault();
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    onFieldDrop(pageNumber, (event.clientX - bounds.left) / bounds.width * 100, (event.clientY - bounds.top) / bounds.height * 100, event.dataTransfer.getData('application/signeo-field'));
+                  }}
                   onClick={(event) => {
                     if (!onPageClick) return;
                     const bounds = event.currentTarget.getBoundingClientRect();
@@ -70,7 +81,7 @@ export default function PdfPages({
                 >
                   <Page
                     pageNumber={pageNumber}
-                    width={pageWidth}
+                    width={pageWidth * zoom / 100}
                     renderTextLayer={false}
                     renderAnnotationLayer={false}
                   />

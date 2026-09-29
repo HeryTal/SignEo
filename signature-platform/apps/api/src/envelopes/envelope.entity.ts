@@ -40,6 +40,10 @@ export type EnvelopeField = {
   fontFamily?: 'SANS' | 'SERIF' | 'MONO' | 'SCRIPT';
   fontSize?: number;
   fontColor?: string;
+  signatureDisplay?: 'MINIMAL' | 'DETAILED';
+  width?: number;
+  height?: number;
+  dateValue?: string;
 };
 export type EnvelopeCollectionRequest = {
   id: string;
@@ -55,6 +59,12 @@ export class Envelope {
   @Column({ type: 'text', default: '' }) message!: string;
   @Column({ name: 'fields', type: 'jsonb', default: [] })
   fields!: EnvelopeField[];
+  @Column({ name: 'preparation_settings', type: 'jsonb', default: () => "'{}'::jsonb" })
+  preparationSettings!: {
+    signingMode?: 'SIMULTANEOUS' | 'SEQUENTIAL' | 'CUSTOM';
+    documentOrder?: string[];
+    documentVisibility?: string[][];
+  };
   @Column({ name: 'collection_requests', type: 'jsonb', default: [] })
   collectionRequests!: EnvelopeCollectionRequest[];
   @Column({ name: 'brand_snapshot', type: 'jsonb', default: () => "'{}'::jsonb" })

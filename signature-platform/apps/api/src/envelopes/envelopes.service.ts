@@ -51,6 +51,12 @@ const FIELD_TYPES = [
   'RADIO',
 ];
 
+function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(value + 'T00:00:00.000Z');
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
 @Injectable()
 export class EnvelopesService {
   private readonly uploadDirectory = resolve(
@@ -81,7 +87,10 @@ export class EnvelopesService {
     expiresAt?: string,
     allowDecline = false,
     collectionRequests: IncomingCollectionRequest[] = [],
+    preparationSettings: Envelope['preparationSettings'] = {},
   ) {
+    if (!preparationSettings || !['SIMULTANEOUS', 'SEQUENTIAL', 'CUSTOM'].includes(preparationSettings.signingMode ?? 'SEQUENTIAL'))
+      throw new BadRequestException('Ordre des destinataires invalide.');
     const expiration = expiresAt ? new Date(expiresAt) : null;
     if (
       expiresAt &&
@@ -121,6 +130,12 @@ export class EnvelopesService {
     const signerEmails = recipientsInput
       .filter((recipient) => recipient.role !== 'APPROVER')
       .map((recipient) => recipient.email.trim().toLowerCase());
+    const allEmails = recipientsInput.map((item) => item.email.trim().toLowerCase());
+    if (new Set(allEmails).size !== allEmails.length)
+      throw new BadRequestException('Chaque destinataire doit avoir une adresse e-mail distincte.');
+    const visibility = preparationSettings.documentVisibility;
+    if (visibility !== undefined && (!Array.isArray(visibility) || visibility.length !== files.length || visibility.some((emails) => !Array.isArray(emails) || emails.some((email) => typeof email !== 'string' || !allEmails.includes(email)))))
+      throw new BadRequestException('Visibilité des documents invalide.');
     if (
       !Array.isArray(collectionRequests) ||
       collectionRequests.length > 10 ||
@@ -166,6 +181,11 @@ export class EnvelopesService {
           (field.fontFamily !== undefined && !['SANS', 'SERIF', 'MONO', 'SCRIPT'].includes(field.fontFamily)) ||
           (field.fontSize !== undefined && (!Number.isInteger(field.fontSize) || field.fontSize < 8 || field.fontSize > 30)) ||
           (field.fontColor !== undefined && !/^#[\da-f]{6}$/i.test(field.fontColor)) ||
+          (field.signatureDisplay !== undefined && !['MINIMAL', 'DETAILED'].includes(field.signatureDisplay)) ||
+          (field.dateValue !== undefined && field.dateValue !== '' && !isCalendarDate(field.dateValue)) ||
+          (field.width !== undefined && (!Number.isFinite(field.width) || field.width < 5 || field.width > 100 || field.x + field.width > 100.01)) ||
+          (field.height !== undefined && (!Number.isFinite(field.height) || field.height < 2 || field.height > 50 || field.y + field.height > 100.01)) ||
+          (visibility !== undefined && field.recipientEmail !== undefined && !visibility[field.documentIndex]?.includes(field.recipientEmail.trim().toLowerCase())) ||
           (field.recipientEmail !== undefined &&
             !signerEmails.includes(
               field.recipientEmail.trim().toLowerCase(),
@@ -245,6 +265,11 @@ export class EnvelopesService {
         status: 'DRAFT',
         expiresAt: expiration,
         allowDecline,
+        preparationSettings: {
+          signingMode: preparationSettings.signingMode ?? 'SEQUENTIAL',
+          documentVisibility: visibility,
+          documentOrder: documentEntities.map((document) => document.storageName),
+        },
         brandSnapshot: {
           displayName: owner.branding?.displayName?.trim() || 'Signeo',
           accentColor: /^#[\da-f]{6}$/i.test(owner.branding?.accentColor ?? '') ? owner.branding.accentColor : '#496b50',
@@ -269,6 +294,10 @@ export class EnvelopesService {
             fontFamily,
             fontSize,
             fontColor,
+            signatureDisplay,
+            width,
+            height,
+            dateValue,
           }) => ({
             id,
             type,
@@ -278,6 +307,10 @@ export class EnvelopesService {
             y,
             label,
             options,
+            signatureDisplay: signatureDisplay ?? 'MINIMAL',
+            dateValue: dateValue || undefined,
+            width,
+            height,
             recipientEmail: recipientEmail?.trim().toLowerCase(),
             fontFamily: fontFamily ?? (type === 'SIGNATURE' || type === 'INITIALS' ? owner.branding?.signatureFont : owner.branding?.textFont) ?? (type === 'SIGNATURE' || type === 'INITIALS' ? 'SCRIPT' : 'SANS'),
             fontSize: fontSize ?? (type === 'SIGNATURE' || type === 'INITIALS' ? owner.branding?.signatureSize : owner.branding?.textSize) ?? (type === 'SIGNATURE' || type === 'INITIALS' ? 22 : 11),
@@ -291,7 +324,11 @@ export class EnvelopesService {
             name: recipient.name.trim(),
             email: recipient.email.trim().toLowerCase(),
             role: recipient.role ?? 'SIGNER',
-            signingOrder: index + 1,
+            signingOrder: preparationSettings.signingMode === 'CUSTOM' || !preparationSettings.signingMode
+              ? index + 1
+              : recipient.role === 'APPROVER' ? 1
+                : preparationSettings.signingMode === 'SIMULTANEOUS' ? 2
+                  : recipientsInput.slice(0, index + 1).filter((item) => item.role !== 'APPROVER').length + 1,
             accessToken: randomUUID().replaceAll('-', ''),
             status: 'WAITING',
             signatureLevel: recipient.signatureLevel ?? 'SIMPLE',
@@ -475,7 +512,7 @@ export class EnvelopesService {
       collectionFiles: (recipient.collectionFiles ?? []).map(
         ({ requestId, originalName }) => ({ requestId, name: originalName }),
       ),
-      documents: recipient.envelope.documents.map(
+      documents: this.orderedDocuments(recipient.envelope).map(
         (document, documentIndex) => ({
           id: document.id,
           name: document.originalName,
@@ -508,7 +545,8 @@ export class EnvelopesService {
                       (!field.recipientEmail ||
                         field.recipientEmail === recipient.email),
                   )
-                  .map(({ id, type, pageNumber, x, y, label, options, fontFamily, fontSize, fontColor }) => ({
+                  .map((field) => ({ ...field }))
+                  .map(({ id, type, pageNumber, x, y, label, options, fontFamily, fontSize, fontColor, ...presentation }) => ({
                     id,
                     type,
                     pageNumber,
@@ -519,10 +557,14 @@ export class EnvelopesService {
                     fontFamily,
                     fontSize,
                     fontColor,
+                    signatureDisplay: 'signatureDisplay' in presentation ? presentation.signatureDisplay : 'MINIMAL',
+                    dateValue: 'dateValue' in presentation ? presentation.dateValue : undefined,
+                    width: 'width' in presentation ? presentation.width : undefined,
+                    height: 'height' in presentation ? presentation.height : undefined,
                   }))
               : [],
         }),
-      ),
+      ).filter((document) => this.canViewDocument(recipient.envelope, recipient.email, document.id)),
     };
   }
 
@@ -595,7 +637,7 @@ export class EnvelopesService {
     const document = recipient.envelope.documents.find(
       (item) => item.id === documentId,
     );
-    if (!document) throw new NotFoundException('Document introuvable.');
+    if (!document || !this.canViewDocument(recipient.envelope, recipient.email, document.id)) throw new NotFoundException('Document introuvable.');
     return { document, path: join(this.uploadDirectory, document.storageName) };
   }
 
@@ -646,6 +688,10 @@ export class EnvelopesService {
       ).filter(
         (item) => item.required && item.recipientEmail === recipient.email,
       );
+      for (const field of envelopeFields) {
+        if (field.type === 'SIGN_DATE' && fieldValues[field.id] !== undefined && !isCalendarDate(fieldValues[field.id]))
+          throw new BadRequestException('Sélectionnez une date valide dans le calendrier.');
+      }
       if (
         requiredCollections.some(
           (request) =>
@@ -699,7 +745,7 @@ export class EnvelopesService {
         if (field.type === 'SIGNATURE')
           completedFieldValues[field.id] = signatureName.trim();
         if (field.type === 'SIGN_DATE')
-          completedFieldValues[field.id] = recipient.signedAt.toISOString();
+          completedFieldValues[field.id] = fieldValues[field.id] ?? field.dateValue ?? recipient.signedAt.toISOString().slice(0, 10);
         if (field.type === 'SIGNER_NAME')
           completedFieldValues[field.id] = recipient.name;
         if (field.type === 'SIGNER_EMAIL')
@@ -709,7 +755,7 @@ export class EnvelopesService {
       }
       await manager.save(recipient);
       const allCompleted = recipient.envelope.recipients.every((item) =>
-        ['SIGNED', 'APPROVED'].includes(item.status),
+        item.id === recipient.id || ['SIGNED', 'APPROVED'].includes(item.status),
       );
       recipient.envelope.status = allCompleted
         ? 'COMPLETED'
@@ -813,8 +859,9 @@ export class EnvelopesService {
       message: envelope.message,
       status: envelope.status,
       createdAt: envelope.createdAt,
+      preparationSettings: envelope.preparationSettings,
       cryptographicPdfEnabled: Boolean(process.env.SIGNING_P12_PATH && process.env.SIGNING_P12_PASSWORD),
-      documents: (envelope.documents ?? []).map((document) => ({
+      documents: this.orderedDocuments(envelope).map((document) => ({
         id: document.id,
         name: document.originalName,
         mimeType: document.mimeType,
@@ -851,7 +898,7 @@ export class EnvelopesService {
       where: { envelope: { id: envelope.id }, action: 'DOCUMENT_SIGNED' },
       order: { createdAt: 'ASC' },
     });
-    for (const [documentIndex, document] of envelope.documents.entries()) {
+    for (const [documentIndex, document] of this.orderedDocuments(envelope).entries()) {
       if (document.signedStorageName) continue;
       if (!document.mimeType.includes('pdf') && !document.originalName.toLowerCase().endsWith('.pdf')) continue;
       const source = await readFile(join(this.uploadDirectory, document.storageName));
@@ -867,13 +914,16 @@ export class EnvelopesService {
           if (!page) continue;
           const x = (field.x / 100) * page.getWidth();
           const y = page.getHeight() - (field.y / 100) * page.getHeight() - 14;
-          const label = field.type === 'CHECKBOX' ? '[x] ' + field.label : value;
+          const label = field.type === 'CHECKBOX' ? '[x] ' + field.label : field.type === 'SIGN_DATE' && isCalendarDate(value) ? value.split('-').reverse().join('/') : value;
           const family = field.fontFamily ?? 'SANS';
           const chosenFont = family === 'SCRIPT' ? StandardFonts.TimesRomanItalic : family === 'SERIF' ? StandardFonts.TimesRoman : family === 'MONO' ? StandardFonts.Courier : StandardFonts.Helvetica;
           const fieldFont = family === 'SANS' ? font : await pdf.embedFont(chosenFont);
           const hex = field.fontColor ?? '#24352b';
           const fieldColor = rgb(parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255);
-          page.drawText(label.slice(0, 200), { x, y, size: field.fontSize ?? 11, font: fieldFont, color: fieldColor, maxWidth: page.getWidth() * 0.55 });
+          page.drawText(label.slice(0, 200), { x, y, size: field.fontSize ?? 11, font: fieldFont, color: fieldColor, maxWidth: page.getWidth() * (field.width ?? 55) / 100 });
+          if (field.type === 'SIGNATURE' && field.signatureDisplay === 'DETAILED') {
+            page.drawText(`Signe le ${event.createdAt.toLocaleDateString('fr-FR')} - ${event.actorEmail}`, { x, y: y - 13, size: 7, font, color: fieldColor, maxWidth: page.getWidth() * (field.width ?? 35) / 100 });
+          }
         }
       }
       const page = pdf.getPage(0);
@@ -895,5 +945,18 @@ export class EnvelopesService {
       document.signedStorageName = signedStorageName;
       await this.documents.save(document);
     }
+  }
+
+  private orderedDocuments(envelope: Envelope) {
+    const order = envelope.preparationSettings?.documentOrder;
+    return [...(envelope.documents ?? [])].sort((a, b) => order
+      ? order.indexOf(a.storageName) - order.indexOf(b.storageName)
+      : new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  }
+
+  private canViewDocument(envelope: Envelope, email: string, documentId: string) {
+    const index = this.orderedDocuments(envelope).findIndex((document) => document.id === documentId);
+    const visibility = envelope.preparationSettings?.documentVisibility;
+    return index >= 0 && (!visibility || Boolean(visibility[index]?.includes(email)));
   }
 }

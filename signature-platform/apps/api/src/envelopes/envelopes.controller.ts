@@ -147,11 +147,18 @@ export class EnvelopesController {
       expiresAt?: string;
       allowDecline?: string;
       collectionRequests?: string;
+      preparationSettings?: string;
     },
   ) {
     let recipients: IncomingRecipient[];
     let fields: IncomingField[];
     let collectionRequests: IncomingCollectionRequest[];
+    let preparationSettings: { signingMode?: 'SIMULTANEOUS' | 'SEQUENTIAL' | 'CUSTOM'; documentVisibility?: string[][] };
+    try {
+      preparationSettings = JSON.parse(body.preparationSettings ?? '{}');
+    } catch {
+      throw new BadRequestException('Les paramètres de préparation sont invalides.');
+    }
     try {
       recipients = JSON.parse(body.recipients ?? '[]') as IncomingRecipient[];
     } catch {
@@ -183,6 +190,7 @@ export class EnvelopesController {
       body.expiresAt,
       body.allowDecline === 'true',
       collectionRequests,
+      preparationSettings,
     );
   }
 

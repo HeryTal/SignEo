@@ -32,6 +32,10 @@ type PublicField = {
   fontFamily?: "SANS" | "SERIF" | "MONO" | "SCRIPT";
   fontSize?: number;
   fontColor?: string;
+  signatureDisplay?: "MINIMAL" | "DETAILED";
+  width?: number;
+  height?: number;
+  dateValue?: string;
 };
 type PublicCollectionRequest = { id: string; label: string; required: boolean };
 type Invitation = {
@@ -83,6 +87,9 @@ export default function SignerPage() {
       .then((payload) => {
         setInvitation(payload);
         setSignatureName(payload.recipient.name);
+        const today = new Date();
+        const localDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+        setFieldValues(Object.fromEntries((payload as Invitation).documents.flatMap((document) => document.fields.filter((field) => field.type === "SIGN_DATE").map((field) => [field.id, field.dateValue || localDate]))));
         setUploadedCollections(
           Object.fromEntries(
             (payload.collectionFiles ?? []).map(
@@ -252,6 +259,8 @@ export default function SignerPage() {
                             const style = {
                               left: `${field.x}%`,
                               top: `${field.y}%`,
+                              ...(field.width ? { width: `${field.width}%`, minWidth: 0, transform: "none" } : {}),
+                              ...(field.height ? { minHeight: `${field.height}%` } : {}),
                               color: field.fontColor ?? "#24352b",
                               fontSize: `${field.fontSize ?? 11}px`,
                               fontFamily: field.fontFamily === "SCRIPT" || field.fontFamily === "SERIF" ? "Georgia, serif" : field.fontFamily === "MONO" ? "monospace" : "Arial, sans-serif",
@@ -277,13 +286,13 @@ export default function SignerPage() {
                               );
                             if (field.type === "SIGN_DATE")
                               return (
-                                <span
+                                <label
                                   key={field.id}
                                   className={inputClass}
                                   style={style}
                                 >
-                                  {new Date().toLocaleDateString("fr-FR")}
-                                </span>
+                                  <input type="date" aria-label="Date de signature" required value={fieldValues[field.id] ?? ""} onChange={(event) => setValue(event.target.value)} />
+                                </label>
                               );
                             if (field.type === "SIGNER_NAME")
                               return (
@@ -379,6 +388,7 @@ export default function SignerPage() {
                                     else setValue(event.target.value);
                                   }}
                                 />
+                                {field.type === "SIGNATURE" && field.signatureDisplay === "DETAILED" && <small>{new Date().toLocaleDateString("fr-FR")} · {invitation.recipient.email}</small>}
                               </label>
                             );
                           })

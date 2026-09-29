@@ -10,6 +10,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
 
@@ -28,7 +29,7 @@ type Recipient = {
   signatureLevel: "SIMPLE" | "ADVANCED" | "QUALIFIED";
   authenticationMethod: "NONE" | "EMAIL_OTP" | "SMS_OTP";
 };
-type DocumentFile = { file: File; previewUrl?: string };
+type DocumentFile = { file: File; previewUrl?: string; hiddenRecipientIds?: string[] };
 type CollectionRequestDraft = {
   id: string;
   label: string;
@@ -71,9 +72,21 @@ type PlacedField = {
   fontFamily: "SANS" | "SERIF" | "MONO" | "SCRIPT";
   fontSize: number;
   fontColor: string;
+  signatureDisplay: "MINIMAL" | "DETAILED";
+  width: number;
+  height: number;
+  dateValue?: string;
 };
 type StyleDefaults = { textFont: "SANS" | "SERIF" | "MONO"; signatureFont: "SCRIPT" | "SERIF" | "SANS"; textColor: string; signatureColor: string; textSize: number; signatureSize: number };
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+
+function PreparationModal({ title, children, close }: { title: string; children: ReactNode; close: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => { ref.current?.showModal(); }, []);
+  return <dialog ref={ref} className="preparation-modal" onCancel={close} aria-label={title}>
+    <header><h2>{title}</h2><button type="button" aria-label="Fermer" onClick={close}>×</button></header>{children}
+  </dialog>;
+}
 
 export default function NewEnvelopePage() {
   const router = useRouter();
@@ -81,6 +94,11 @@ export default function NewEnvelopePage() {
   const documentsRef = useRef<DocumentFile[]>([]);
   const [documents, setDocuments] = useState<DocumentFile[]>([]);
   const [selected, setSelected] = useState(0);
+  const [zoom, setZoom] = useState(100);
+  const [signingMode, setSigningMode] = useState<"SIMULTANEOUS" | "SEQUENTIAL" | "CUSTOM">("SIMULTANEOUS");
+  const [visibilityDraft, setVisibilityDraft] = useState<string[][] | null>(null);
+  const [fieldDraft, setFieldDraft] = useState<PlacedField | null>(null);
+  const [collecting, setCollecting] = useState(false);
   const [fields, setFields] = useState<PlacedField[]>([]);
   const [styleDefaults, setStyleDefaults] = useState<StyleDefaults>({ textFont: "SANS", signatureFont: "SCRIPT", textColor: "#24352b", signatureColor: "#315b45", textSize: 11, signatureSize: 22 });
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
@@ -114,7 +132,7 @@ export default function NewEnvelopePage() {
   >([]);
   const [copied, setCopied] = useState(false);
 
-  documentsRef.current = documents;
+  useEffect(() => { documentsRef.current = documents; }, [documents]);
   useEffect(
     () => () =>
       documentsRef.current.forEach(
@@ -193,6 +211,29 @@ export default function NewEnvelopePage() {
       return next;
     });
   }
+  function reorderDocument(from: number, to: number) {
+    if (to < 0 || to >= documents.length || from === to) return;
+    const order = documents.map((_, index) => index);
+    order.splice(to, 0, order.splice(from, 1)[0]);
+    setDocuments(order.map((index) => documents[index]));
+    setFields((items) => items.map((field) => ({ ...field, documentIndex: order.indexOf(field.documentIndex) })));
+    setSelected(order.indexOf(selected));
+  }
+  function removeRecipient(id: string) {
+    setRecipients((items) => items.filter((item) => item.id !== id));
+    setFields((items) => items.filter((item) => item.recipientId !== id));
+    setCollectionRequests((items) => items.filter((item) => item.recipientId !== id));
+    if (selectedRecipientId === id) setSelectedRecipientId(recipients.find((item) => item.id !== id && item.role === "SIGNER")?.id ?? "");
+  }
+  function addRecipient(role: Recipient["role"]) {
+    if (recipients.filter((item) => item.role === role).length >= (role === "SIGNER" ? 100 : 10)) return;
+    const id = crypto.randomUUID();
+    setRecipients((items) => [...items, { id, name: "", email: "", role, signatureLevel: "SIMPLE", authenticationMethod: "NONE" }]);
+    if (role === "SIGNER") setSelectedRecipientId(id);
+  }
+  function reorderRecipient(index: number, offset: number) {
+    setRecipients((items) => { const next = [...items]; [next[index], next[index + offset]] = [next[index + offset], next[index]]; return next; });
+  }
   function moveField(
     event: ReactPointerEvent<HTMLDivElement>,
     fieldId: string,
@@ -211,14 +252,14 @@ export default function NewEnvelopePage() {
                 x: Math.max(
                   1,
                   Math.min(
-                    90,
+                    100 - field.width,
                     field.x + (pointer.movementX / bounds.width) * 100,
                   ),
                 ),
                 y: Math.max(
                   2,
                   Math.min(
-                    95,
+                    100 - field.height,
                     field.y + (pointer.movementY / bounds.height) * 100,
                   ),
                 ),
@@ -250,11 +291,20 @@ export default function NewEnvelopePage() {
         i === index ? { ...recipient, [key]: value } : recipient,
       ),
     );
+    if (key === "role" && value === "APPROVER") {
+      const id = recipients[index].id;
+      setFields((items) => items.filter((item) => item.recipientId !== id));
+      setCollectionRequests((items) => items.filter((item) => item.recipientId !== id));
+      if (selectedRecipientId === id) setSelectedRecipientId(recipients.find((item) => item.id !== id && item.role === "SIGNER")?.id ?? "");
+    }
   }
 
-  function placeField(pageNumber: number, x: number, y: number) {
-    if (!placingType) return;
-    const definition = FIELD_TOOLS.find((tool) => tool.type === placingType)!;
+  function placeField(pageNumber: number, x: number, y: number, type = placingType) {
+    if (!type || !FIELD_TOOLS.some((tool) => tool.type === type)) return;
+    if (type !== "READ_ONLY_TEXT" && !recipients.some((item) => item.id === selectedRecipientId && item.role === "SIGNER")) { setError("Ajoutez et sélectionnez un signataire."); return; }
+    if (documents[selected]?.hiddenRecipientIds?.includes(selectedRecipientId)) { setError("Ce document est masqué pour ce signataire. Modifiez sa visibilité avant d’ajouter un champ."); return; }
+    const definition = FIELD_TOOLS.find((tool) => tool.type === type)!;
+    const placingType = type;
     setFields((current) => [
       ...current,
       {
@@ -263,8 +313,11 @@ export default function NewEnvelopePage() {
         recipientId: selectedRecipientId,
         documentIndex: selected,
         pageNumber,
-        x: Math.max(1, Math.min(90, x)),
-        y: Math.max(2, Math.min(95, y)),
+        x: Math.max(1, Math.min(68, x)),
+        y: Math.max(2, Math.min(90, y)),
+        width: 30,
+        height: placingType === "SIGNATURE" ? 9 : 4,
+        signatureDisplay: "MINIMAL",
         label:
           placingType === "MENTION"
             ? "Mention à saisir"
@@ -285,6 +338,14 @@ export default function NewEnvelopePage() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    if (recipients.some((recipient) => !recipient.name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient.email.trim()))) {
+      setError("Complétez le nom et l’e-mail de chaque destinataire.");
+      return;
+    }
+    if (fields.some((field) => !recipients.some((recipient) => recipient.id === field.recipientId && recipient.role === "SIGNER"))) {
+      setError("Attribuez chaque champ à un signataire avant l’envoi.");
+      return;
+    }
     if (!documents.length) {
       setStep(1);
       setError("Ajoutez au moins un document.");
@@ -314,6 +375,7 @@ export default function NewEnvelopePage() {
       data.append("message", message);
       data.append("expiresAt", expiresAt + "T23:59:59.999Z");
       data.append("allowDecline", String(allowDecline));
+      data.append("preparationSettings", JSON.stringify({ signingMode, documentVisibility: documents.map((document) => recipients.filter((recipient) => !document.hiddenRecipientIds?.includes(recipient.id)).map((recipient) => recipient.email.trim().toLowerCase())) }));
       data.append(
         "collectionRequests",
         JSON.stringify(
@@ -344,6 +406,10 @@ export default function NewEnvelopePage() {
               fontFamily,
               fontSize,
               fontColor,
+              signatureDisplay,
+              width,
+              height,
+              dateValue,
             }) => ({
               id,
               type,
@@ -359,6 +425,10 @@ export default function NewEnvelopePage() {
               fontFamily,
               fontSize,
               fontColor,
+              signatureDisplay,
+              width,
+              height,
+              dateValue,
             }),
           ),
         ),
@@ -543,11 +613,17 @@ export default function NewEnvelopePage() {
                     : "document-list-item"
                 }
                 key={`${file.name}-${index}`}
+                draggable
+                onDragStart={(event) => event.dataTransfer.setData("application/signeo-document", String(index))}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => { event.preventDefault(); const from = event.dataTransfer.getData("application/signeo-document"); if (from !== "") reorderDocument(Number(from), index); }}
               >
                 <button type="button" onClick={() => setSelected(index)}>
                   <span>{index + 1}</span>
                   <b>{file.name}</b>
                 </button>
+                <button type="button" aria-label={`Monter ${file.name}`} disabled={index === 0} onClick={() => reorderDocument(index, index - 1)}>↑</button>
+                <button type="button" aria-label={`Descendre ${file.name}`} disabled={index === documents.length - 1} onClick={() => reorderDocument(index, index + 1)}>↓</button>
                 <button
                   type="button"
                   aria-label={`Supprimer ${file.name}`}
@@ -572,16 +648,19 @@ export default function NewEnvelopePage() {
               onChange={onInput}
               hidden
             />
+            <section className="preparation-collection">
+              <div className="document-list-title"><span>⇧</span><b>Documents à collecter</b><em>{collectionRequests.length}</em></div>
+              {collectionRequests.map((request) => <p key={request.id}>{request.label || "Document à préciser"}<small>{recipients.find((item) => item.id === request.recipientId)?.name}</small></p>)}
+              <button className="document-add" type="button" onClick={() => setCollecting(true)}>⊕ Demander un document</button>
+            </section>
           </aside>
           <div
             className={`document-preview${placingType ? " placing-text" : ""}`}
           >
             <div className="preview-tools">
-              <span>
-                {placingType
-                  ? `Clique pour placer : ${FIELD_TOOLS.find((tool) => tool.type === placingType)?.label}`
-                  : "Choisis un champ à droite"}
-              </span>
+              <div className="preview-tool-group"><button type="button" aria-label="Réduire le zoom" disabled={zoom <= 50} onClick={() => setZoom(zoom - 25)}>−</button><output>{zoom}%</output><button type="button" aria-label="Augmenter le zoom" disabled={zoom >= 200} onClick={() => setZoom(zoom + 25)}>+</button></div>
+              <div className="preview-tool-group"><button type="button" aria-label="Document précédent" disabled={selected === 0} onClick={() => setSelected(selected - 1)}>←</button><span>Doc. {selected + 1}/{documents.length} · {current?.file.name}</span><button type="button" aria-label="Document suivant" disabled={selected === documents.length - 1} onClick={() => setSelected(selected + 1)}>→</button></div>
+              <button type="button" onClick={() => setVisibilityDraft(documents.map((document) => [...(document.hiddenRecipientIds ?? [])]))}>▤ Visible par {recipients.filter((recipient) => !current?.hiddenRecipientIds?.includes(recipient.id)).length} destinataire(s)</button>
               {placingType && (
                 <button
                   type="button"
@@ -597,6 +676,8 @@ export default function NewEnvelopePage() {
             {current?.previewUrl ? (
               <PdfPages
                 file={current.file}
+                zoom={zoom}
+                onFieldDrop={(page, x, y, type) => placeField(page, x, y, type as FieldType)}
                 onPageClick={placingType ? placeField : undefined}
                 renderOverlay={(pageNumber) =>
                   fields
@@ -609,30 +690,39 @@ export default function NewEnvelopePage() {
                       <div
                         className={`placed-field-preview field-${field.type.toLowerCase()}`}
                         key={field.id}
-                        style={{ left: `${field.x}%`, top: `${field.y}%`, color: field.fontColor, fontSize: `${field.fontSize}px`, fontFamily: field.fontFamily === "SCRIPT" || field.fontFamily === "SERIF" ? "Georgia, serif" : field.fontFamily === "MONO" ? "monospace" : "Arial, sans-serif", fontStyle: field.fontFamily === "SCRIPT" ? "italic" : "normal" }}
+                        style={{ left: `${field.x}%`, top: `${field.y}%`, width: `${field.width}%`, minHeight: `${field.height}%`, color: field.fontColor, fontSize: `${field.fontSize}px`, fontFamily: field.fontFamily === "SCRIPT" || field.fontFamily === "SERIF" ? "Georgia, serif" : field.fontFamily === "MONO" ? "monospace" : "Arial, sans-serif", fontStyle: field.fontFamily === "SCRIPT" ? "italic" : "normal", background: recipients.findIndex((recipient) => recipient.id === field.recipientId) % 2 ? "#e5def8ee" : "#dfeefbee" }}
                         onPointerDown={(event) => moveField(event, field.id)}
                         onClick={(event) => event.stopPropagation()}
                         onClickCapture={() => setSelectedFieldId(field.id)}
                       >
-                        <span>
+                        {field.type === "SIGNATURE" ? <div className="signature-stamp"><strong>{recipients.find((item) => item.id === field.recipientId)?.name || "Nom du signataire"}</strong>{field.signatureDisplay === "DETAILED" && <small>JJ/MM/AAAA · {recipients.find((item) => item.id === field.recipientId)?.email}</small>}<small>Signature électronique · Signeo</small></div> : <><span>
                           {
                             FIELD_TOOLS.find((tool) => tool.type === field.type)
                               ?.icon
                           }
                         </span>
                         <input
-                          aria-label="Libellé du champ"
-                          value={field.label}
+                          aria-label={FIELD_TOOLS.find((tool) => tool.type === field.type)?.label ?? "Libellé du champ"}
+                          type={field.type === "SIGN_DATE" ? "date" : "text"}
+                          readOnly={field.type === "SIGNER_NAME" || field.type === "SIGNER_EMAIL"}
+                          placeholder={field.label}
+                          value={field.type === "SIGNER_NAME"
+                            ? recipients.find((recipient) => recipient.id === field.recipientId)?.name ?? ""
+                            : field.type === "SIGNER_EMAIL"
+                              ? recipients.find((recipient) => recipient.id === field.recipientId)?.email ?? ""
+                              : field.type === "SIGN_DATE" ? field.dateValue ?? "" : field.label}
                           onChange={(event) =>
                             setFields((items) =>
                               items.map((item) =>
                                 item.id === field.id
-                                  ? { ...item, label: event.target.value }
+                                  ? field.type === "SIGN_DATE" ? { ...item, dateValue: event.target.value } : { ...item, label: event.target.value }
                                   : item,
                               ),
                             )
                           }
-                        />
+                        /></>}
+                        <button type="button" aria-label="Modifier le champ" onClick={() => setFieldDraft({ ...field })}>✎</button>
+                        <button type="button" aria-label="Redimensionner le champ" onClick={() => setFieldDraft({ ...field })}>⤢</button>
                         <button
                           type="button"
                           aria-label="Supprimer le champ"
@@ -657,8 +747,9 @@ export default function NewEnvelopePage() {
             )}
           </div>
           <aside className="fields-panel">
+            {error && <p className="upload-error" role="alert">{error}</p>}
             <div className="fields-heading">
-              <b>Préparation</b>
+              <b>Champs</b>
               <span>
                 {documents.length} fichier{documents.length > 1 ? "s" : ""}
               </span>
@@ -681,8 +772,10 @@ export default function NewEnvelopePage() {
               </select>
             </label>
             <div className="field-tool-grid">
-              {FIELD_TOOLS.map((tool) => (
+              {FIELD_TOOLS.filter((tool) => ["READ_ONLY_TEXT", "INITIALS"].includes(tool.type)).map((tool) => (
                 <button
+                  draggable
+                  onDragStart={(event) => event.dataTransfer.setData("application/signeo-field", tool.type)}
                   key={tool.type}
                   type="button"
                   className={
@@ -699,6 +792,24 @@ export default function NewEnvelopePage() {
                 </button>
               ))}
             </div>
+            <label className="custom-order-toggle"><input type="checkbox" checked={signingMode === "CUSTOM"} onChange={(event) => setSigningMode(event.target.checked ? "CUSTOM" : "SIMULTANEOUS")} />Ordre personnalisé des destinataires <span title="En mode personnalisé, chaque destinataire intervient dans l’ordre indiqué, quel que soit son rôle.">ⓘ</span></label>
+            {(["APPROVER", "SIGNER"] as const).map((role) => <details className="preparation-recipients" key={role} open>
+              <summary>{role === "SIGNER" ? "Signataires" : "Approbateurs"} <em>{recipients.filter((recipient) => recipient.role === role).length}</em></summary>
+              {role === "SIGNER" && <div className="signing-mode"><button type="button" disabled={signingMode === "CUSTOM"} aria-pressed={signingMode === "SIMULTANEOUS"} onClick={() => setSigningMode("SIMULTANEOUS")}>Simultané {signingMode === "SIMULTANEOUS" && "✓"}</button><button type="button" disabled={signingMode === "CUSTOM"} aria-pressed={signingMode === "SEQUENTIAL"} onClick={() => setSigningMode("SEQUENTIAL")}>Séquentiel {signingMode === "SEQUENTIAL" && "✓"}</button></div>}
+              {recipients.filter((recipient) => recipient.role === role).map((recipient) => {
+                const index = recipients.indexOf(recipient);
+                return <details key={recipient.id} className={`preparation-recipient recipient-color-${index % 2}`} open={recipient.id === selectedRecipientId || role === "APPROVER"}>
+                  <summary><span className="recipient-avatar">{recipient.name.split(" ").map((part) => part[0]).join("").slice(0, 2) || index + 1}</span>{recipient.name || (role === "SIGNER" ? "Nouveau signataire" : "Nouvel approbateur")} <em>{fields.filter((field) => field.recipientId === recipient.id).length}</em></summary>
+                  <div className="preparation-recipient-form">
+                    <label className="form-field">Nom<input value={recipient.name} maxLength={120} onChange={(event) => updateRecipient(index, "name", event.target.value)} /></label>
+                    <label className="form-field">E-mail<input type="email" value={recipient.email} onChange={(event) => updateRecipient(index, "email", event.target.value)} /></label>
+                    <div className="recipient-inline-actions">{signingMode !== "SIMULTANEOUS" && <><span>Position {index + 1}</span><button type="button" disabled={index === 0} aria-label="Monter le destinataire" onClick={() => reorderRecipient(index, -1)}>↑</button><button type="button" disabled={index === recipients.length - 1} aria-label="Descendre le destinataire" onClick={() => reorderRecipient(index, 1)}>↓</button></>}<button type="button" onClick={() => removeRecipient(recipient.id)}>Supprimer</button></div>
+                  </div>
+                  {role === "SIGNER" && <div className="field-tool-grid">{FIELD_TOOLS.filter((tool) => !["READ_ONLY_TEXT", "INITIALS"].includes(tool.type)).map((tool) => <button key={tool.type} type="button" draggable onDragStart={(event) => { setSelectedRecipientId(recipient.id); event.dataTransfer.setData("application/signeo-field", tool.type); }} className={`field-option ${placingType === tool.type && selectedRecipientId === recipient.id ? "selected-field-tool" : ""}`} onClick={() => { setSelectedRecipientId(recipient.id); setPlacingType(tool.type); }}><span>⠿</span><span>{tool.icon}</span>{tool.label}</button>)}</div>}
+                </details>;
+              })}
+              <button type="button" className="document-add" onClick={() => addRecipient(role)}>⊕ Ajouter un {role === "SIGNER" ? "signataire" : "approbateur"}</button>
+            </details>)}
             <p className="workflow-hint">
               {
                 fields.filter((field) => field.documentIndex === selected)
@@ -814,7 +925,7 @@ export default function NewEnvelopePage() {
                 + Demander un document
               </button>
             </div>
-            {collectionRequests.map((request, index) => (
+            {collectionRequests.map((request) => (
               <div className="collection-request-row" key={request.id}>
                 <label className="form-field">
                   Type de document
@@ -1011,11 +1122,7 @@ export default function NewEnvelopePage() {
                     className="remove-recipient"
                     type="button"
                     aria-label="Supprimer le destinataire"
-                    onClick={() =>
-                      setRecipients((current) =>
-                        current.filter((_, i) => i !== index),
-                      )
-                    }
+                    onClick={() => removeRecipient(recipient.id)}
                   >
                     ×
                   </button>
@@ -1044,6 +1151,30 @@ export default function NewEnvelopePage() {
           </form>
         </section>
       )}
+      {fieldDraft && <PreparationModal title={fieldDraft.type === "SIGNATURE" ? "Signature" : "Modifier le champ"} close={() => setFieldDraft(null)}>
+        <form onSubmit={(event) => { event.preventDefault(); setFields((items) => items.map((item) => item.id === fieldDraft.id ? fieldDraft : item)); setFieldDraft(null); }}>
+          {fieldDraft.type === "SIGNATURE" && <><b>Aperçu de la signature</b><div className="signature-preview"><div className="signature-stamp"><strong style={{ color: fieldDraft.fontColor }}>{recipients.find((item) => item.id === fieldDraft.recipientId)?.name || "Nom du signataire"}</strong>{fieldDraft.signatureDisplay === "DETAILED" && <small>JJ/MM/AAAA · {recipients.find((item) => item.id === fieldDraft.recipientId)?.email}</small>}<small>Signature électronique · Signeo</small></div></div><div className="signature-display-options">{(["MINIMAL", "DETAILED"] as const).map((display) => <label key={display}><input type="radio" name="signature-display" checked={fieldDraft.signatureDisplay === display} onChange={() => setFieldDraft({ ...fieldDraft, signatureDisplay: display })} />Affichage {display === "MINIMAL" ? "minimal" : "détaillé"}</label>)}</div></>}
+          <label className="form-field">Attribuer à<select value={fieldDraft.recipientId} onChange={(event) => setFieldDraft({ ...fieldDraft, recipientId: event.target.value })}>{recipients.filter((item) => item.role === "SIGNER" && !documents[fieldDraft.documentIndex].hiddenRecipientIds?.includes(item.id)).map((item) => <option key={item.id} value={item.id}>{item.name || item.email || "Signataire"}</option>)}</select></label>
+          {fieldDraft.type !== "SIGNATURE" && <label className="form-field">{fieldDraft.type === "READ_ONLY_TEXT" ? "Texte à afficher" : "Libellé"}<input required maxLength={160} value={fieldDraft.label} onChange={(event) => setFieldDraft({ ...fieldDraft, label: event.target.value })} /></label>}
+          {fieldDraft.type === "RADIO" && <label className="form-field">Choix (2 à 6, un par ligne)<textarea required value={fieldDraft.options?.join("\n")} onChange={(event) => setFieldDraft({ ...fieldDraft, options: event.target.value.split("\n") })} /></label>}
+          <div className="signature-display-options"><label className="form-field">Largeur : {Math.round(fieldDraft.width)}%<input type="range" min={5} max={Math.min(70, 100 - fieldDraft.x)} value={fieldDraft.width} onChange={(event) => setFieldDraft({ ...fieldDraft, width: Number(event.target.value) })} /></label><label className="form-field">Hauteur : {Math.round(fieldDraft.height)}%<input type="range" min={2} max={Math.min(30, 100 - fieldDraft.y)} value={fieldDraft.height} onChange={(event) => setFieldDraft({ ...fieldDraft, height: Number(event.target.value) })} /></label></div>
+          <footer><button type="button" onClick={() => setFieldDraft(null)}>Annuler</button><button className="envelope-next" type="submit" disabled={fieldDraft.type === "RADIO" && (!fieldDraft.options || fieldDraft.options.length < 2 || fieldDraft.options.length > 6 || fieldDraft.options.some((option) => !option.trim() || option.length > 80))}>Sauvegarder</button></footer>
+        </form>
+      </PreparationModal>}
+      {visibilityDraft && <PreparationModal title="Gérer la visibilité des documents" close={() => setVisibilityDraft(null)}>
+        <p className="visibility-notice">Choisissez les documents que chaque destinataire peut consulter. Un document contenant ses champs reste visible pour lui.</p>
+        <div className="visibility-table-scroll"><table className="visibility-table"><thead><tr><th>Destinataire</th>{documents.map((document, index) => <th key={index}><span>▤ Doc. {index + 1}/{documents.length}</span>{document.file.name}</th>)}</tr></thead><tbody>{recipients.map((recipient) => <tr key={recipient.id}><th>{recipient.name || recipient.email || "Nouveau destinataire"}<small>{recipient.role === "SIGNER" ? "Signataire" : "Approbateur"}</small></th>{documents.map((_, index) => <td key={index}><label><input type="checkbox" checked={!visibilityDraft[index].includes(recipient.id)} disabled={fields.some((field) => field.documentIndex === index && field.recipientId === recipient.id)} onChange={(event) => setVisibilityDraft(visibilityDraft.map((ids, i) => i === index ? event.target.checked ? ids.filter((id) => id !== recipient.id) : [...ids, recipient.id] : ids))} />Peut consulter</label></td>)}</tr>)}</tbody></table></div>
+        <footer><button type="button" onClick={() => setVisibilityDraft(null)}>Annuler</button><button type="button" className="envelope-next" onClick={() => { setDocuments((items) => items.map((document, index) => ({ ...document, hiddenRecipientIds: visibilityDraft[index] }))); setVisibilityDraft(null); }}>Enregistrer</button></footer>
+      </PreparationModal>}
+      {collecting && <PreparationModal title="Documents à collecter" close={() => setCollecting(false)}>
+        <p>Demandez une pièce à joindre avant la signature.</p>
+        {collectionRequests.map((request) => <div className="collection-draft" key={request.id}>
+          <label className="form-field">Document demandé<input maxLength={160} placeholder="Ex. Justificatif de domicile" value={request.label} onChange={(event) => setCollectionRequests((items) => items.map((item) => item.id === request.id ? { ...item, label: event.target.value } : item))} /></label>
+          <label className="form-field">À fournir par<select value={request.recipientId} onChange={(event) => setCollectionRequests((items) => items.map((item) => item.id === request.id ? { ...item, recipientId: event.target.value } : item))}>{recipients.filter((item) => item.role === "SIGNER").map((item) => <option key={item.id} value={item.id}>{item.name || item.email || "Signataire"}</option>)}</select></label>
+          <label><input type="checkbox" checked={request.required} onChange={(event) => setCollectionRequests((items) => items.map((item) => item.id === request.id ? { ...item, required: event.target.checked } : item))} /> Obligatoire</label><button type="button" onClick={() => setCollectionRequests((items) => items.filter((item) => item.id !== request.id))}>Supprimer</button>
+        </div>)}
+        <footer><button type="button" disabled={collectionRequests.length >= 10 || !recipients.some((item) => item.role === "SIGNER")} onClick={() => setCollectionRequests((items) => [...items, { id: crypto.randomUUID(), label: "", recipientId: recipients.find((item) => item.role === "SIGNER")!.id, required: true }])}>+ Demander un document</button><button type="button" className="envelope-next" onClick={() => setCollecting(false)}>Terminer</button></footer>
+      </PreparationModal>}
     </main>
   );
 }
