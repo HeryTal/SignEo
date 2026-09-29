@@ -678,7 +678,7 @@ export default function NewEnvelopePage() {
                 file={current.file}
                 zoom={zoom}
                 onFieldDrop={(page, x, y, type) => placeField(page, x, y, type as FieldType)}
-                onPageClick={placingType ? placeField : undefined}
+                onPageClick={(page, x, y) => { setSelectedFieldId(null); if (placingType) placeField(page, x, y); }}
                 renderOverlay={(pageNumber) =>
                   fields
                     .filter(
@@ -691,7 +691,8 @@ export default function NewEnvelopePage() {
                         className={`placed-field-preview field-${field.type.toLowerCase()}`}
                         key={field.id}
                         style={{ left: `${field.x}%`, top: `${field.y}%`, width: `${field.width}%`, minHeight: `${field.height}%`, color: field.fontColor, fontSize: `${field.fontSize}px`, fontFamily: field.fontFamily === "SCRIPT" || field.fontFamily === "SERIF" ? "Georgia, serif" : field.fontFamily === "MONO" ? "monospace" : "Arial, sans-serif", fontStyle: field.fontFamily === "SCRIPT" ? "italic" : "normal", background: recipients.findIndex((recipient) => recipient.id === field.recipientId) % 2 ? "#e5def8ee" : "#dfeefbee" }}
-                        onPointerDown={(event) => moveField(event, field.id)}
+                        onPointerDown={(event) => { setSelectedFieldId(field.id); moveField(event, field.id); }}
+                        onFocus={() => setSelectedFieldId(field.id)}
                         onClick={(event) => event.stopPropagation()}
                         onClickCapture={() => setSelectedFieldId(field.id)}
                       >
@@ -721,6 +722,7 @@ export default function NewEnvelopePage() {
                             )
                           }
                         /></>}
+                        {selectedFieldId === field.id && <>
                         <button type="button" aria-label="Modifier le champ" onClick={() => setFieldDraft({ ...field })}>✎</button>
                         <button type="button" aria-label="Redimensionner le champ" onClick={() => setFieldDraft({ ...field })}>⤢</button>
                         <button
@@ -734,6 +736,7 @@ export default function NewEnvelopePage() {
                         >
                           ×
                         </button>
+                        </>}
                       </div>
                     ))
                 }
@@ -1155,7 +1158,9 @@ export default function NewEnvelopePage() {
         <form onSubmit={(event) => { event.preventDefault(); setFields((items) => items.map((item) => item.id === fieldDraft.id ? fieldDraft : item)); setFieldDraft(null); }}>
           {fieldDraft.type === "SIGNATURE" && <><b>Aperçu de la signature</b><div className="signature-preview"><div className="signature-stamp"><strong style={{ color: fieldDraft.fontColor }}>{recipients.find((item) => item.id === fieldDraft.recipientId)?.name || "Nom du signataire"}</strong>{fieldDraft.signatureDisplay === "DETAILED" && <small>JJ/MM/AAAA · {recipients.find((item) => item.id === fieldDraft.recipientId)?.email}</small>}<small>Signature électronique · Signeo</small></div></div><div className="signature-display-options">{(["MINIMAL", "DETAILED"] as const).map((display) => <label key={display}><input type="radio" name="signature-display" checked={fieldDraft.signatureDisplay === display} onChange={() => setFieldDraft({ ...fieldDraft, signatureDisplay: display })} />Affichage {display === "MINIMAL" ? "minimal" : "détaillé"}</label>)}</div></>}
           <label className="form-field">Attribuer à<select value={fieldDraft.recipientId} onChange={(event) => setFieldDraft({ ...fieldDraft, recipientId: event.target.value })}>{recipients.filter((item) => item.role === "SIGNER" && !documents[fieldDraft.documentIndex].hiddenRecipientIds?.includes(item.id)).map((item) => <option key={item.id} value={item.id}>{item.name || item.email || "Signataire"}</option>)}</select></label>
-          {fieldDraft.type !== "SIGNATURE" && <label className="form-field">{fieldDraft.type === "READ_ONLY_TEXT" ? "Texte à afficher" : "Libellé"}<input required maxLength={160} value={fieldDraft.label} onChange={(event) => setFieldDraft({ ...fieldDraft, label: event.target.value })} /></label>}
+          {fieldDraft.type === "SIGN_DATE" ? <label className="form-field">Date<input type="date" value={fieldDraft.dateValue ?? ""} onChange={(event) => setFieldDraft({ ...fieldDraft, dateValue: event.target.value })} /></label>
+            : fieldDraft.type === "SIGNER_NAME" || fieldDraft.type === "SIGNER_EMAIL" ? <label className="form-field">{fieldDraft.label}<input readOnly value={recipients.find((item) => item.id === fieldDraft.recipientId)?.[fieldDraft.type === "SIGNER_NAME" ? "name" : "email"] ?? ""} /></label>
+              : fieldDraft.type !== "SIGNATURE" && <label className="form-field">{fieldDraft.type === "READ_ONLY_TEXT" ? "Texte à afficher" : "Libellé"}<input required maxLength={160} value={fieldDraft.label} onChange={(event) => setFieldDraft({ ...fieldDraft, label: event.target.value })} /></label>}
           {fieldDraft.type === "RADIO" && <label className="form-field">Choix (2 à 6, un par ligne)<textarea required value={fieldDraft.options?.join("\n")} onChange={(event) => setFieldDraft({ ...fieldDraft, options: event.target.value.split("\n") })} /></label>}
           <div className="signature-display-options"><label className="form-field">Largeur : {Math.round(fieldDraft.width)}%<input type="range" min={5} max={Math.min(70, 100 - fieldDraft.x)} value={fieldDraft.width} onChange={(event) => setFieldDraft({ ...fieldDraft, width: Number(event.target.value) })} /></label><label className="form-field">Hauteur : {Math.round(fieldDraft.height)}%<input type="range" min={2} max={Math.min(30, 100 - fieldDraft.y)} value={fieldDraft.height} onChange={(event) => setFieldDraft({ ...fieldDraft, height: Number(event.target.value) })} /></label></div>
           <footer><button type="button" onClick={() => setFieldDraft(null)}>Annuler</button><button className="envelope-next" type="submit" disabled={fieldDraft.type === "RADIO" && (!fieldDraft.options || fieldDraft.options.length < 2 || fieldDraft.options.length > 6 || fieldDraft.options.some((option) => !option.trim() || option.length > 80))}>Sauvegarder</button></footer>

@@ -22,6 +22,26 @@ const files = [{ originalname: 'contrat.pdf', mimetype: 'application/pdf', size:
 const fields: EnvelopeField[] = [{ id: 'signature', type: 'SIGNATURE', documentIndex: 0, pageNumber: 1, x: 10, y: 20, label: 'Signature', recipientEmail: people[0].email, signatureDisplay: 'DETAILED', width: 30, height: 9 }];
 
 describe('Préparation des dossiers', () => {
+  it.each(['2026-02-30', 'not-a-date', ''])('refuse une date de calendrier invalide : %s', async (date) => {
+    const recipient = { id: 'alice', ...people[0], status: 'WAITING', envelope: { status: 'SENT', fields: [{ ...fields[0], type: 'SIGN_DATE' }], recipients: [] } };
+    const manager = { getRepository: () => ({ findOne: vi.fn().mockResolvedValue(recipient) }), save: vi.fn() };
+    const { service } = setup({ transaction: (run: (value: typeof manager) => unknown) => run(manager) });
+    await expect(service.sign('token', 'Alice', true, { signature: date })).rejects.toThrow('date valide');
+    expect(manager.save).not.toHaveBeenCalled();
+  });
+
+  it('conserve la date choisie et les coordonnées du destinataire dans les valeurs enregistrées', async () => {
+    const recipient = { id: 'alice', ...people[0], status: 'WAITING', signingOrder: 1, envelope: { id: 'envelope', status: 'SENT', fields: [
+      { ...fields[0], id: 'date', type: 'SIGN_DATE', dateValue: '2026-09-29' },
+      { ...fields[0], id: 'name', type: 'SIGNER_NAME' },
+      { ...fields[0], id: 'email', type: 'SIGNER_EMAIL' },
+    ], recipients: [{ id: 'bob', status: 'WAITING', signingOrder: 1 }] } };
+    const manager = { getRepository: () => ({ findOne: vi.fn().mockResolvedValue(recipient) }), save: vi.fn() };
+    const { service } = setup({ transaction: (run: (value: typeof manager) => unknown) => run(manager) });
+    await service.sign('token', 'Alice', true, { date: '2026-10-02', name: 'Autre nom', email: 'other@example.com' });
+    expect(manager.save).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ details: expect.objectContaining({ fieldValues: { date: '2026-10-02', name: 'Alice', email: people[0].email } }) }));
+  });
+
   it.each([false, true])('autorise Bob avant Alice uniquement en simultané : %s', async (simultaneous) => {
     const alice = { id: 'alice', name: 'Alice', status: 'WAITING', signingOrder: 1 };
     const bob = { id: 'bob', name: 'Bob', email: people[1].email, role: 'SIGNER', status: 'WAITING', signingOrder: simultaneous ? 1 : 2 };
