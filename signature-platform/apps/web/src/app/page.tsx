@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useState } from "react";
+import apiStyles from "./landing-api.module.css";
 
 const Arrow = () => <span aria-hidden="true">↗</span>;
 const steps = [
@@ -25,7 +26,7 @@ export default function Home() {
         <button className="menu-toggle" aria-expanded={menu} aria-controls="navigation" onClick={() => setMenu(!menu)} onKeyDown={e => { if (e.key === "Escape") setMenu(false); }}>{menu ? "Fermer −" : "Menu +"}</button>
         <nav id="navigation" className={menu ? "nav open" : "nav"} aria-label="Navigation principale" onClick={() => setMenu(false)}>
           <a className="mobile-auth-link" href="/connexion">Se connecter</a><a className="mobile-auth-link" href="/inscription">Créer un espace</a>
-          <a href="#plateforme">La plateforme</a><a href="#fonctionnement">Comment ça marche</a><a href="#usages">Pour qui ?</a><a href="#questions">Vos questions</a>
+          <a href="#plateforme">La plateforme</a><a href="#fonctionnement">Comment ça marche</a><a href="#usages">Pour qui ?</a><a href="#api">API</a><a href="#questions">Vos questions</a>
         </nav>
         <a className="button small header-cta" href="#fonctionnement">Découvrir Signeo <Arrow /></a>
       </header>
@@ -91,6 +92,34 @@ export default function Home() {
           ].map(item => <a href="#fonctionnement" className="use-card" key={item.tag}><div className="card-image"><Image src={`/images/${item.image}`} alt={item.alt} fill sizes="(max-width: 760px) 90vw, 30vw" /><span className="card-arrow"><Arrow /></span></div><span className="eyebrow">{item.tag}</span><h3>{item.title}</h3><p>{item.text}</p></a>)}</div>
         </section>
 
+        <section className={apiStyles.section} id="api" aria-labelledby="api-title">
+          <div className={"wrap " + apiStyles.grid}>
+            <div>
+              <p className="eyebrow">POUR LES ÉQUIPES QUI CONNECTENT LEURS OUTILS</p>
+              <h2 id="api-title">Vos accords.<br /><em>Dans votre écosystème.</em></h2>
+              <p className={apiStyles.intro}>Retrouvez le statut de vos enveloppes depuis votre application, votre CRM ou un outil interne grâce à l’API REST Signeo.</p>
+              <ul className={apiStyles.features}>
+                <li><span aria-hidden="true">⌘</span><div><b>Un accès pour chaque intégration</b><p>Créez une clé liée à votre espace de travail et révoquez-la lorsque vous n’en avez plus besoin.</p></div></li>
+                <li><span aria-hidden="true">↗</span><div><b>Vos enveloppes, à portée d’appel</b><p>Consultez leurs titres, leurs statuts et le nombre de documents et de destinataires.</p></div></li>
+                <li><span aria-hidden="true">✓</span><div><b>Un démarrage accompagné</b><p>Exemples copiables, test de connexion, journal des appels et documentation OpenAPI dans votre espace Développeurs.</p></div></li>
+              </ul>
+              <a href="/developers" className="button">Consulter la documentation API <Arrow /></a>
+              <p className={apiStyles.note}>Documentation accessible sans compte · Clés API dans votre espace privé</p>
+            </div>
+            <div className={apiStyles.example}>
+              <div className={apiStyles.bar}><span>VOTRE PREMIER APPEL</span><span>REST · JSON</span></div>
+              <div className={apiStyles.code}>
+                <p><span className={apiStyles.method}>GET</span> /v1/envelopes</p>
+                <pre><code>{"Authorization: Bearer VOTRE_CLE_API"}</code></pre>
+                <div className={apiStyles.response}><span>EXEMPLE DE RÉPONSE</span><span>200 OK</span></div>
+                <pre><code>{'{\n  "data": [\n    {\n      "title": "Accord de collaboration",\n      "status": "COMPLETED",\n      "recipientCount": 2,\n      "documentCount": 1\n    }\n  ]\n}'}</code></pre>
+                <small>Extrait illustratif · Données fictives</small>
+              </div>
+              <div className={apiStyles.caption}>Lecture des enveloppes disponible · 60 requêtes par minute et par clé</div>
+            </div>
+          </div>
+        </section>
+
         <section className="closing wrap"><span className="closing-star" aria-hidden="true">✳</span><p className="eyebrow">LES BELLES HISTOIRES COMMENCENT PAR UN OUI.</p><h2>On signe pour<br /><em>la suite ?</em></h2><p>Découvrez aujourd’hui les premiers traits de Signeo.</p><a href="#fonctionnement" className="button light">Explorer la démo <Arrow /></a><span className="closing-note">Simplement. Humainement.</span></section>
 
         <section className="section wrap faq" id="questions"><div><p className="eyebrow">TOUT SIMPLEMENT</p><h2>Quelques questions.<br /><em>Des réponses claires.</em></h2></div><div className="faq-list">{[
@@ -99,6 +128,7 @@ export default function Home() {
           ["Que deviennent les informations saisies dans la démo ?", "Le nom que vous saisissez reste dans l’état de cette page, dans votre navigateur. Le formulaire ne l’envoie à aucun serveur. Il disparaît lorsque vous rechargez la page."],
           ["Est-ce utilisable sur mobile ?", "Oui, cette démonstration est conçue pour être explorée sur téléphone, tablette et ordinateur, depuis votre navigateur."],
           ["Quels seront les tarifs de Signeo ?", "Les offres et les tarifs ne sont pas encore définis. Cette démonstration est accessible gratuitement et sans engagement."],
+          ["Puis-je connecter mon logiciel à Signeo ?", "Oui. L’API permet actuellement de consulter les enveloppes de votre espace avec une clé API. Connectez-vous à l’espace Développeurs pour créer une clé, tester un appel et consulter la documentation. La création et l’envoi d’enveloppes par l’API publique ainsi que les webhooks ne sont pas encore disponibles."],
         ].map(([q, a]) => <details key={q}><summary>{q}<span aria-hidden="true">+</span></summary><p>{a}</p></details>)}</div></section>
       </main>
       <footer className="footer wrap"><div className="footer-top"><a className="brand" href="#"><span className="brand-mark" aria-hidden="true">s.</span>signeo</a><p>Un petit geste.<br />De nouveaux possibles.</p><a href="#fonctionnement">Découvrir l’expérience <Arrow /></a></div><div className="footer-bottom"><span>© {new Date().getFullYear()} Signeo · Plateforme en développement</span><a href="#questions">Une question ?</a><span>Imaginé pour vous faire avancer.</span></div></footer>
