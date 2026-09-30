@@ -127,6 +127,12 @@ export class EnvelopesController {
     return new StreamableFile(createReadStream(path));
   }
 
+  @Get('envelopes/:id/audit-trail')
+  @UseGuards(JwtAuthGuard)
+  auditTrail(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.envelopes.auditTrail(request.user.sub, id);
+  }
+
   @Post('envelopes')
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(

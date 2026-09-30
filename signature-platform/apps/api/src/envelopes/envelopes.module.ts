@@ -8,10 +8,11 @@ import { Envelope } from './envelope.entity.js';
 import { EnvelopesController } from './envelopes.controller.js';
 import { EnvelopesService } from './envelopes.service.js';
 import { Recipient } from './recipient.entity.js';
+import { MailService } from './mail.service.js';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Envelope, EnvelopeDocument, Recipient, AuditEvent, User]), AuthModule],
   controllers: [EnvelopesController],
-  providers: [EnvelopesService],
+  providers: [EnvelopesService, MailService],
 })
 export class EnvelopesModule {}

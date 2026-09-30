@@ -7,10 +7,10 @@ vi.mock('node:fs/promises', () => ({ mkdir: vi.fn(), writeFile: vi.fn(), unlink:
 function setup(dataSource: object = {}) {
   const envelopes = { create: vi.fn((value) => value), save: vi.fn(), findOne: vi.fn() };
   const documents = { create: vi.fn((value) => value) };
-  const recipients = { create: vi.fn((value) => value), findOne: vi.fn() };
+  const recipients = { create: vi.fn((value) => value), findOne: vi.fn(), save: vi.fn() };
   const events = { create: vi.fn((value) => value), save: vi.fn() };
   const users = { findOneByOrFail: vi.fn().mockResolvedValue({ id: 'owner', email: 'owner@example.com', branding: {} }) };
-  const service = new EnvelopesService(envelopes as never, documents as never, recipients as never, events as never, users as never, dataSource as never);
+  const service = new EnvelopesService(envelopes as never, documents as never, recipients as never, events as never, users as never, dataSource as never, { sendInvitation: vi.fn() } as never);
   return { service, envelopes, recipients };
 }
 const people = [

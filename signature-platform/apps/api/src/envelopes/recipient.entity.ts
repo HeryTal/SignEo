@@ -26,6 +26,10 @@ export class Recipient {
   authenticationMethod!: 'NONE' | 'EMAIL_OTP' | 'SMS_OTP';
   @Column({ name: 'signed_at', type: 'timestamptz', nullable: true })
   signedAt!: Date | null;
+  @Column({ name: 'viewed_at', type: 'timestamptz', nullable: true })
+  viewedAt!: Date | null;
+  @Column({ name: 'last_reminded_at', type: 'timestamptz', nullable: true })
+  lastRemindedAt!: Date | null;
   @Column({ name: 'collection_files', type: 'jsonb', default: [] })
   collectionFiles!: {
     requestId: string;

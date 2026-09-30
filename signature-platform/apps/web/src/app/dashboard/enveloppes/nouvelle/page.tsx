@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
+import { clearEnvelopeDraft, loadEnvelopeDraft, saveEnvelopeDraft } from "@/app/ui/envelope-draft-store";
 
 const PdfPages = dynamic(() => import("@/app/ui/pdf-pages"), {
   ssr: false,
@@ -128,11 +129,39 @@ export default function NewEnvelopePage() {
       email: string;
       role: "SIGNER" | "APPROVER";
       signingUrl: string;
+      delivered?: boolean;
+      deliveryReason?: string;
     }[]
   >([]);
   const [copied, setCopied] = useState(false);
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState("");
+  const [previewRecipientId, setPreviewRecipientId] = useState<string | null>(null);
 
   useEffect(() => { documentsRef.current = documents; }, [documents]);
+  useEffect(() => {
+    loadEnvelopeDraft()
+      .then((draft) => {
+        if (!draft) return;
+        setDocuments(draft.documents.map((document) => ({ ...document, previewUrl: document.file.name.toLowerCase().endsWith(".pdf") ? URL.createObjectURL(document.file) : undefined })));
+        setSelected(draft.selected); setFields(draft.fields as PlacedField[]); setRecipients(draft.recipients as Recipient[]);
+        setCollectionRequests(draft.collectionRequests as CollectionRequestDraft[]); setTitle(draft.title); setMessage(draft.message);
+        setExpiresAt(draft.expiresAt); setAllowDecline(draft.allowDecline); setSigningMode(draft.signingMode as typeof signingMode); setStep(draft.step as 1 | 2);
+        setSelectedRecipientId((draft.recipients as Recipient[]).find((recipient) => recipient.role === "SIGNER")?.id ?? "recipient-1");
+        setDraftSavedAt(new Date(draft.updatedAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
+      })
+      .catch(() => setError("Le brouillon local n’a pas pu être restauré."))
+      .finally(() => setDraftReady(true));
+  }, []);
+  useEffect(() => {
+    if (!draftReady || invitationLinks.length) return;
+    const timer = window.setTimeout(() => {
+      saveEnvelopeDraft({ updatedAt: new Date().toISOString(), title, message, documents: documents.map(({ file, hiddenRecipientIds }) => ({ file, hiddenRecipientIds })), selected, fields, recipients, collectionRequests, expiresAt, allowDecline, signingMode, step })
+        .then(() => setDraftSavedAt(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })))
+        .catch(() => setError("Le brouillon local n’a pas pu être sauvegardé."));
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [draftReady, title, message, documents, selected, fields, recipients, collectionRequests, expiresAt, allowDecline, signingMode, step, invitationLinks.length]);
   useEffect(
     () => () =>
       documentsRef.current.forEach(
@@ -346,6 +375,14 @@ export default function NewEnvelopePage() {
       setError("Attribuez chaque champ à un signataire avant l’envoi.");
       return;
     }
+    const signers = recipients.filter((recipient) => recipient.role === "SIGNER");
+    const unsigned = signers.find((recipient) => !fields.some((field) => field.type === "SIGNATURE" && field.recipientId === recipient.id));
+    if (unsigned) { setStep(1); setError(`Placez une signature pour ${unsigned.name || unsigned.email || "chaque signataire"}.`); return; }
+    if (collectionRequests.some((request) => !request.label.trim() || !signers.some((recipient) => recipient.id === request.recipientId))) {
+      setError("Complétez chaque demande de document à collecter."); return;
+    }
+    const invalidRadio = fields.find((field) => field.type === "RADIO" && (!field.options || field.options.length < 2 || field.options.some((option) => !option.trim())));
+    if (invalidRadio) { setStep(1); setError("Chaque bouton radio doit avoir au moins deux choix valides."); return; }
     if (!documents.length) {
       setStep(1);
       setError("Ajoutez au moins un document.");
@@ -463,7 +500,18 @@ export default function NewEnvelopePage() {
         );
       }
       const payload = await sent.json();
-      setInvitationLinks(payload.invitations ?? []);
+      const deliveries = new Map(
+        (payload.deliveries ?? []).map(
+          (delivery: { email: string; delivered: boolean; reason?: string }) => [delivery.email, delivery],
+        ),
+      );
+      setInvitationLinks(
+        (payload.invitations ?? []).map((invite: { name: string; email: string; role: "SIGNER" | "APPROVER"; signingUrl: string }) => {
+          const delivery = deliveries.get(invite.email) as { delivered: boolean; reason?: string } | undefined;
+          return { ...invite, delivered: delivery?.delivered, deliveryReason: delivery?.reason };
+        }),
+      );
+      await clearEnvelopeDraft();
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Une erreur est survenue.",
@@ -485,18 +533,18 @@ export default function NewEnvelopePage() {
     setTimeout(() => setCopied(false), 1800);
   }
 
-  if (invitationLinks.length)
+  if (invitationLinks.length) {
+    const deliveryFailures = invitationLinks.filter((invite) => invite.delivered === false);
+    const deliveredCount = invitationLinks.filter((invite) => invite.delivered).length;
     return (
       <main className="envelope-shell">
         <section className="send-success">
           <span className="success-mark">✓</span>
           <p className="eyebrow">ENVELOPPE ENVOYÉE</p>
           <h1>Votre document est en route.</h1>
-          <p>
-            Les liens sont prêts. Transmettez à chaque personne son lien privé.
-            L’envoi automatique par e-mail sera ajouté avec la configuration
-            d’un service d’e-mail.
-          </p>
+          <p>{deliveryFailures.length
+            ? `${deliveredCount} e-mail${deliveredCount > 1 ? "s" : ""} envoyé${deliveredCount > 1 ? "s" : ""}. Les liens restent disponibles pour les destinataires dont l’envoi a échoué.`
+            : "Les invitations ont été envoyées par e-mail. Les liens privés restent disponibles ci-dessous."}</p>
           <div className="invitation-link-list">
             {invitationLinks.map((invite) => (
               <article key={invite.email}>
@@ -505,7 +553,10 @@ export default function NewEnvelopePage() {
                   <small>
                     {invite.email} ·{" "}
                     {invite.role === "APPROVER" ? "Approbateur" : "Signataire"}
+                    {invite.delivered === true ? " · E-mail envoyé" : ""}
+                    {invite.delivered === false ? " · E-mail non envoyé" : ""}
                   </small>
+                  {invite.deliveryReason && <small>Raison : {invite.deliveryReason}</small>}
                 </div>
                 <a href={invite.signingUrl} target="_blank" rel="noreferrer">
                   Ouvrir le lien ↗
@@ -524,6 +575,7 @@ export default function NewEnvelopePage() {
         </section>
       </main>
     );
+  }
 
   const current = documents[selected];
   return (
@@ -544,6 +596,7 @@ export default function NewEnvelopePage() {
             <b>2</b> Paramètres
           </span>
         </div>
+        <small className="draft-status">{draftReady ? draftSavedAt ? `Brouillon sauvegardé à ${draftSavedAt}` : "Brouillon prêt" : "Restauration du brouillon…"}</small>
         <button
           className="envelope-next"
           type="button"
@@ -757,6 +810,7 @@ export default function NewEnvelopePage() {
                 {documents.length} fichier{documents.length > 1 ? "s" : ""}
               </span>
             </div>
+            <button type="button" className="preview-recipient-button" disabled={!recipients.some((recipient) => recipient.role === "SIGNER")} onClick={() => setPreviewRecipientId(selectedRecipientId || (recipients.find((recipient) => recipient.role === "SIGNER")?.id ?? null))}>Aperçu pour ce signataire</button>
             <label className="field-recipient-select">
               Champ destiné à
               <select
@@ -1180,6 +1234,18 @@ export default function NewEnvelopePage() {
         </div>)}
         <footer><button type="button" disabled={collectionRequests.length >= 10 || !recipients.some((item) => item.role === "SIGNER")} onClick={() => setCollectionRequests((items) => [...items, { id: crypto.randomUUID(), label: "", recipientId: recipients.find((item) => item.role === "SIGNER")!.id, required: true }])}>+ Demander un document</button><button type="button" className="envelope-next" onClick={() => setCollecting(false)}>Terminer</button></footer>
       </PreparationModal>}
+      {previewRecipientId && (() => {
+        const recipient = recipients.find((item) => item.id === previewRecipientId);
+        if (!recipient) return null;
+        const visible = documents.map((document, index) => ({ document, index })).filter(({ document }) => !document.hiddenRecipientIds?.includes(recipient.id));
+        const recipientFields = fields.filter((field) => field.recipientId === recipient.id);
+        return <PreparationModal title={`Aperçu de ${recipient.name || recipient.email || "ce signataire"}`} close={() => setPreviewRecipientId(null)}>
+          <p className="visibility-notice">Voici les documents et champs qui seront visibles par ce signataire.</p>
+          <div className="recipient-preview-summary"><b>{visible.length} document{visible.length > 1 ? "s" : ""}</b><b>{recipientFields.length} champ{recipientFields.length > 1 ? "s" : ""} à compléter</b></div>
+          {visible.map(({ document, index }) => <article className="recipient-preview-document" key={document.file.name + index}><b>▤ {document.file.name}</b><ul>{recipientFields.filter((field) => field.documentIndex === index).map((field) => <li key={field.id}>{FIELD_TOOLS.find((tool) => tool.type === field.type)?.label}</li>)}</ul>{!recipientFields.some((field) => field.documentIndex === index) && <small>Aucun champ à compléter sur ce document.</small>}</article>)}
+          <footer><button type="button" className="envelope-next" onClick={() => setPreviewRecipientId(null)}>Fermer l’aperçu</button></footer>
+        </PreparationModal>;
+      })()}
     </main>
   );
 }

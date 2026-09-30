@@ -22,6 +22,8 @@ import { pdflibAddPlaceholder } from '@signpdf/placeholder-pdf-lib';
 import { P12Signer } from '@signpdf/signer-p12';
 import { SignPdf } from '@signpdf/signpdf';
 import { SUBFILTER_ETSI_CADES_DETACHED } from '@signpdf/utils';
+import { Cron } from '@nestjs/schedule';
+import { MailService } from './mail.service.js';
 
 export type IncomingRecipient = {
   name: string;
@@ -75,6 +77,7 @@ export class EnvelopesService {
     private readonly events: Repository<AuditEvent>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly dataSource: DataSource,
+    private readonly mail: MailService,
   ) {}
 
   async create(
@@ -465,7 +468,18 @@ export class EnvelopesService {
         })),
       };
     });
-    return result;
+    const deliveries = await Promise.all(result.invitations.map(async (invite) => {
+      try { return { email: invite.email, ...(await this.mail.sendInvitation({ to: invite.email, recipientName: invite.name, signingUrl: invite.signingUrl, envelopeTitle: result.envelope.title, expiresAt: result.envelope.expiresAt })) }; }
+      catch (error) { return { email: invite.email, delivered: false, reason: error instanceof Error ? error.message : 'EMAIL_FAILED' }; }
+    }));
+    await Promise.all(deliveries.map((delivery) => this.events.save(this.events.create({
+      envelope: { id } as Envelope,
+      actor: null,
+      actorEmail: delivery.email,
+      action: delivery.delivered ? 'INVITATION_EMAIL_SENT' : 'INVITATION_EMAIL_PENDING',
+      details: delivery.delivered ? {} : { reason: delivery.reason },
+    }))));
+    return { ...result, deliveries };
   }
 
   async getPublicInvitation(token: string) {
@@ -480,6 +494,11 @@ export class EnvelopesService {
       ['SIGNED', 'APPROVED'].includes(recipient.status)
     )
       throw new NotFoundException('Invitation introuvable ou déjà traitée.');
+    if (!recipient.viewedAt) {
+      recipient.viewedAt = new Date();
+      await this.recipients.save(recipient);
+      await this.events.save(this.events.create({ envelope: recipient.envelope, actor: null, actorEmail: recipient.email, action: 'INVITATION_VIEWED', details: {} }));
+    }
     if (
       recipient.envelope.expiresAt &&
       recipient.envelope.expiresAt.getTime() < Date.now()
@@ -649,6 +668,18 @@ export class EnvelopesService {
     return { document, path: join(this.uploadDirectory, document.signedStorageName) };
   }
 
+  async auditTrail(ownerId: string, envelopeId: string) {
+    const envelope = await this.envelopes.findOne({ where: { id: envelopeId, owner: { id: ownerId } }, relations: { recipients: true, events: true, documents: true } });
+    if (!envelope) throw new NotFoundException('Enveloppe introuvable.');
+    return {
+      envelope: { id: envelope.id, title: envelope.title, status: envelope.status, createdAt: envelope.createdAt, expiresAt: envelope.expiresAt },
+      recipients: envelope.recipients.map((recipient) => ({ name: recipient.name, email: recipient.email, role: recipient.role, status: recipient.status, viewedAt: recipient.viewedAt, signedAt: recipient.signedAt })),
+      documents: this.orderedDocuments(envelope).map((document) => ({ name: document.originalName, checksum: document.checksum, signedPdfAvailable: Boolean(document.signedStorageName) })),
+      events: envelope.events.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map((event) => ({ action: event.action, actorEmail: event.actorEmail, createdAt: event.createdAt, details: event.details })),
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
   async sign(
     token: string,
     signatureName: string,
@@ -784,11 +815,15 @@ export class EnvelopesService {
     if (result.status === 'COMPLETED') {
       const completedEnvelope = await this.envelopes.findOne({
         where: { id: result.envelopeId },
-        relations: { documents: true, recipients: true },
+        relations: { documents: true, recipients: true, owner: true },
       });
       if (completedEnvelope) {
         try { await this.createCryptographicallySignedPdfs(completedEnvelope); }
         catch (error) { console.error('PDF cryptographic sealing failed:', error instanceof Error ? error.message : 'Unknown error'); }
+        try {
+          const delivery = await this.mail.sendCompletionNotice(completedEnvelope.owner.email, completedEnvelope.title);
+          await this.events.save(this.events.create({ envelope: completedEnvelope, actor: null, actorEmail: completedEnvelope.owner.email, action: delivery.delivered ? 'COMPLETION_EMAIL_SENT' : 'COMPLETION_EMAIL_PENDING', details: delivery.delivered ? {} : { reason: delivery.reason } }));
+        } catch (error) { console.error('Completion email failed:', error); }
       }
     }
     return result;
@@ -859,6 +894,7 @@ export class EnvelopesService {
       message: envelope.message,
       status: envelope.status,
       createdAt: envelope.createdAt,
+      expiresAt: envelope.expiresAt,
       preparationSettings: envelope.preparationSettings,
       cryptographicPdfEnabled: Boolean(process.env.SIGNING_P12_PATH && process.env.SIGNING_P12_PASSWORD),
       documents: this.orderedDocuments(envelope).map((document) => ({
@@ -875,6 +911,8 @@ export class EnvelopesService {
         email: recipient.email,
         role: recipient.role,
         status: recipient.status,
+        viewedAt: recipient.viewedAt,
+        lastRemindedAt: recipient.lastRemindedAt,
         signingOrder: recipient.signingOrder,
         signatureLevel: recipient.signatureLevel,
         authenticationMethod: recipient.authenticationMethod,
@@ -958,5 +996,26 @@ export class EnvelopesService {
     const index = this.orderedDocuments(envelope).findIndex((document) => document.id === documentId);
     const visibility = envelope.preparationSettings?.documentVisibility;
     return index >= 0 && (!visibility || Boolean(visibility[index]?.includes(email)));
+  }
+
+  @Cron('0 9 * * *')
+  async sendDailyReminders() {
+    const pending = await this.recipients.find({
+      where: { status: 'WAITING', envelope: { status: 'SENT' } },
+      relations: { envelope: true },
+    });
+    const now = Date.now();
+    for (const recipient of pending) {
+      if (recipient.lastRemindedAt && now - recipient.lastRemindedAt.getTime() < 24 * 60 * 60 * 1000) continue;
+      if (recipient.envelope.expiresAt && recipient.envelope.expiresAt.getTime() < now) continue;
+      const origin = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
+      try {
+        const delivery = await this.mail.sendInvitation({ to: recipient.email, recipientName: recipient.name, envelopeTitle: recipient.envelope.title, signingUrl: `${origin}/signer/${recipient.accessToken}`, expiresAt: recipient.envelope.expiresAt });
+        if (!delivery.delivered) continue;
+        recipient.lastRemindedAt = new Date();
+        await this.recipients.save(recipient);
+        await this.events.save(this.events.create({ envelope: recipient.envelope, actor: null, actorEmail: recipient.email, action: 'REMINDER_EMAIL_SENT', details: {} }));
+      } catch (error) { console.error('Reminder email failed:', error); }
+    }
   }
 }

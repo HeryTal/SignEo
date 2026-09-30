@@ -22,6 +22,7 @@ type Detail = {
     role: string;
     status: string;
     signingOrder: number;
+    viewedAt?: string;
     collectionFiles: CollectionFile[];
   }[];
   events: {
@@ -45,6 +46,12 @@ const labels: Record<string, string> = {
   ENVELOPE_APPROVED: "Enveloppe approuvée",
   COLLECTION_DOCUMENT_UPLOADED: "Pièce justificative reçue",
   SIGNATURE_DECLINED: "Signature refusée",
+  INVITATION_VIEWED: "Invitation consultée",
+  INVITATION_EMAIL_SENT: "E-mail d’invitation envoyé",
+  INVITATION_EMAIL_PENDING: "E-mail d’invitation à configurer",
+  REMINDER_EMAIL_SENT: "E-mail de rappel envoyé",
+  COMPLETION_EMAIL_SENT: "E-mail de fin de dossier envoyé",
+  COMPLETION_EMAIL_PENDING: "E-mail de fin de dossier à configurer",
 };
 
 export default function EnvelopeDetailPage() {
@@ -90,6 +97,13 @@ export default function EnvelopeDetailPage() {
     const objectUrl = URL.createObjectURL(await response.blob());
     const anchor = document.createElement("a"); anchor.href = objectUrl; anchor.download = name.replace(/\.pdf$/i, "") + "-signe.pdf"; anchor.click(); URL.revokeObjectURL(objectUrl);
   }
+  async function downloadAuditTrail() {
+    const token = localStorage.getItem("signeo_access_token");
+    const response = await fetch(`${API}/envelopes/${id}/audit-trail`, { headers: { Authorization: `Bearer ${token ?? ""}` } });
+    if (!response.ok) { setError("Impossible de générer le journal de preuve."); return; }
+    const objectUrl = URL.createObjectURL(new Blob([JSON.stringify(await response.json(), null, 2)], { type: "application/json" }));
+    const anchor = document.createElement("a"); anchor.href = objectUrl; anchor.download = `journal-de-preuve-${id}.json`; anchor.click(); URL.revokeObjectURL(objectUrl);
+  }
 
   return (
     <DashboardLayout
@@ -129,7 +143,7 @@ export default function EnvelopeDetailPage() {
                       ? "Approuvé"
                       : recipient.status === "DECLINED"
                         ? "Refusé"
-                        : "En attente"}
+                    : recipient.viewedAt ? "Consulté" : "En attente"}
                 </em>
               </article>
             ))}
@@ -147,6 +161,7 @@ export default function EnvelopeDetailPage() {
             <p className="detail-date">
               Créée le {new Date(item.createdAt).toLocaleString("fr-FR")}
             </p>
+            {item.status === "COMPLETED" && <button type="button" className="download-collected-file" onClick={downloadAuditTrail}>Télécharger le journal de preuve</button>}
           </section>
           <section className="detail-card">
             <p className="eyebrow">PIÈCES JUSTIFICATIVES REÇUES</p>
