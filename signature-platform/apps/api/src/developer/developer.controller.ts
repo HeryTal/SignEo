@@ -10,6 +10,7 @@ type AuthenticatedRequest = Request & { user: { sub: string } };
 export class DeveloperController {
   constructor(private readonly keys: ApiKeyService) {}
   @Get() list(@Req() request: AuthenticatedRequest) { return this.keys.list(request.user.sub); }
-  @Post() create(@Req() request: AuthenticatedRequest, @Body() body: { name?: string; environment?: ApiKeyEnvironment }) { if (!body.environment) throw new BadRequestException('Environnement requis.'); return this.keys.create(request.user.sub, body.name ?? '', body.environment); }
+  @Get('logs') logs(@Req() request: AuthenticatedRequest) { return this.keys.listLogs(request.user.sub); }
+  @Post() create(@Req() request: AuthenticatedRequest, @Body() body: { name?: string; environment?: ApiKeyEnvironment; scopes?: string[] }) { if (!body.environment) throw new BadRequestException('Environnement requis.'); return this.keys.create(request.user.sub, body.name ?? '', body.environment, body.scopes); }
   @Delete(':id') revoke(@Req() request: AuthenticatedRequest, @Param('id') id: string) { return this.keys.revoke(request.user.sub, id); }
 }

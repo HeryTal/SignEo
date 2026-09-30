@@ -20,13 +20,15 @@ export class ApiKeyService {
     return keys.map((key) => this.dto(key));
   }
 
-  async create(userId: string, name: string, environment: ApiKeyEnvironment) {
+  async create(userId: string, name: string, environment: ApiKeyEnvironment, scopes: string[] = ['envelopes:read']) {
     const membership = await this.workspaces.activeForUser(userId);
     this.workspaces.requireAdmin(membership.role);
     if (!name.trim() || name.trim().length > 80) throw new BadRequestException('Donnez un nom de 1 à 80 caractères à cette clé.');
     if (!['SANDBOX', 'PRODUCTION'].includes(environment)) throw new BadRequestException('Environnement invalide.');
     const secret = `signeo_${environment.toLowerCase()}_${randomBytes(32).toString('base64url')}`;
-    const key = await this.keys.save(this.keys.create({ name: name.trim(), environment, prefix: secret.slice(0, 22), secretHash: this.hash(secret), workspace: membership.workspace }));
+    const allowed = ['envelopes:read', 'envelopes:write'];
+    if (!Array.isArray(scopes) || !scopes.length || scopes.some((scope) => !allowed.includes(scope))) throw new BadRequestException('Permissions invalides.');
+    const key = await this.keys.save(this.keys.create({ name: name.trim(), environment, prefix: secret.slice(0, 22), secretHash: this.hash(secret), scopes, workspace: membership.workspace }));
     return { ...this.dto(key), secret };
   }
 
@@ -49,7 +51,8 @@ export class ApiKeyService {
     await this.logs.save(this.logs.create({ apiKey: key, method: method.slice(0, 8), path: path.slice(0, 255) }));
     return key;
   }
+  async listLogs(userId: string) { const membership = await this.workspaces.activeForUser(userId); const logs = await this.logs.find({ where: { apiKey: { workspace: { id: membership.workspace.id } } }, relations: { apiKey: true }, order: { createdAt: 'DESC' }, take: 100 }); return logs.map((log) => ({ id: log.id, method: log.method, path: log.path, createdAt: log.createdAt, keyName: log.apiKey.name })); }
 
   private hash(value: string) { return createHash('sha256').update(value).digest('hex'); }
-  private dto(key: ApiKey) { return { id: key.id, name: key.name, environment: key.environment, prefix: key.prefix, createdAt: key.createdAt, lastUsedAt: key.lastUsedAt, revokedAt: key.revokedAt }; }
+  private dto(key: ApiKey) { return { id: key.id, name: key.name, environment: key.environment, prefix: key.prefix, scopes: key.scopes, createdAt: key.createdAt, lastUsedAt: key.lastUsedAt, revokedAt: key.revokedAt }; }
 }

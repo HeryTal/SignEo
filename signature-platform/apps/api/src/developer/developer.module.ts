@@ -10,5 +10,6 @@ import { ApiKeyService } from './api-key.service.js';
 import { ApiRequestLog } from './api-request-log.entity.js';
 import { DeveloperController } from './developer.controller.js';
 import { PublicApiController } from './public-api.controller.js';
-@Module({ imports: [TypeOrmModule.forFeature([ApiKey, ApiRequestLog, Envelope]), WorkspacesModule, JwtModule.register({ secret: process.env.JWT_SECRET ?? 'local-development-secret-change-me' })], controllers: [DeveloperController, PublicApiController], providers: [ApiKeyService, ApiKeyGuard, JwtAuthGuard] })
+import { OpenApiController } from './openapi.controller.js';
+@Module({ imports: [TypeOrmModule.forFeature([ApiKey, ApiRequestLog, Envelope]), WorkspacesModule, JwtModule.register({ secret: process.env.JWT_SECRET ?? 'local-development-secret-change-me' })], controllers: [DeveloperController, PublicApiController, OpenApiController], providers: [ApiKeyService, ApiKeyGuard, JwtAuthGuard] })
 export class DeveloperModule {}

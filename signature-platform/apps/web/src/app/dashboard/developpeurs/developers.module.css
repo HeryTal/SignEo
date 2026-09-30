@@ -1,0 +1,61 @@
+.root { color: #243b32; font-size: 13px; line-height: 1.65; }
+.root * { box-sizing: border-box; }
+.hero { display: flex; justify-content: space-between; align-items: center; gap: 28px; padding: 32px; border-radius: 16px; background: #173e31; color: #fff; }
+.hero h3 { font-size: 32px; line-height: 1.2; margin: 12px 0; }
+.hero p { color: #d0dfd3; max-width: 470px; }
+.hero button { background: #d9f8a7; border: 0; border-radius: 7px; padding: 11px 16px; color: #173e31; font-weight: 600; cursor: pointer; }
+.eyebrow { font: 600 10px var(--sans); letter-spacing: 1.7px; color: #63806c; }
+.hero .eyebrow { color: #c8dfa9; }
+.endpoint { display: grid; gap: 12px; min-width: 0; padding: 22px; border: 1px solid #ffffff30; border-radius: 10px; background: #ffffff08; }
+.endpoint span { font-size: 9px; letter-spacing: 1.5px; color: #c8dfa9; }
+.endpoint code { overflow-wrap: anywhere; }
+.endpoint small { color: #c4d5ca; }
+.tabs { display: flex; gap: 24px; overflow-x: auto; margin: 24px 0; border-bottom: 1px solid #d9e2d8; }
+.tabs button { flex-shrink: 0; padding: 12px 0; border: 0; border-bottom: 3px solid transparent; background: transparent; color: #607369; font: 500 12px var(--sans); cursor: pointer; }
+.tabs button[aria-current] { border-color: #315d43; color: #234b34; }
+.grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 20px; margin-bottom: 20px; }
+.card { min-width: 0; background: white; border: 1px solid #dfe7dc; border-radius: 12px; padding: 26px; }
+.card h3, .success h3 { font-size: 26px; margin: 8px 0 12px; }
+.card h4 { font-size: 18px; margin: 30px 0 12px; }
+.card p { color: #5a6e62; }
+.field { display: grid; gap: 7px; font-weight: 600; margin: 18px 0; }
+.field input, .field select { width: 100%; border: 1px solid #cdd9ce; background: #fff; border-radius: 7px; padding: 11px 12px; color: #243b32; font: inherit; }
+.root button:focus-visible, .root input:focus-visible, .root select:focus-visible, .root a:focus-visible { outline: 3px solid #83a26d; outline-offset: 3px; }
+.environments, .permissions { border: 0; padding: 0; margin: 20px 0; }
+.environments { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.environments legend, .permissions legend { font-weight: 600; padding: 0 0 9px; }
+.environments label, .permissions label { display: flex; align-items: flex-start; gap: 9px; border: 1px solid #d8e2d4; padding: 12px; border-radius: 8px; }
+.environments label:has(input:checked) { border-color: #668b57; background: #f3f8ed; }
+.environments small, .permissions small { display: block; font-size: 11px; color: #627362; margin-top: 3px; }
+.root input { accent-color: #315d43; }
+.note { padding: 12px 14px; background: #f4f6f1; border-radius: 7px; font-size: 12px; }
+.primary, .secondary, .danger { display: inline-block; padding: 10px 14px; border-radius: 7px; font: 600 12px var(--sans); cursor: pointer; text-decoration: none; }
+.primary { background: #264f39; color: white; border: 1px solid #264f39; }
+.secondary { color: #315d43; border: 1px solid #ccd9c7; background: white; }
+.danger { background: #fff8f6; border: 1px solid #e9ccc4; color: #9a3e31; }
+.root button:disabled { opacity: .5; cursor: not-allowed; }
+.root form > small { display: block; margin-top: 10px; }
+.steps { padding-left: 22px; }
+.steps li { padding: 5px 0; }
+.code { background: #172a23; border-radius: 9px; overflow: hidden; margin: 18px 0; color: #e0efd9; }
+.code > div { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #ffffff15; font-size: 11px; }
+.code button { background: #ffffff12; border: 1px solid #ffffff25; color: white; padding: 5px 9px; border-radius: 5px; cursor: pointer; }
+.code pre { margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.8; }
+.success { background: #eef7e6; border: 1px solid #c1d8af; border-radius: 12px; padding: 26px; margin-bottom: 22px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.heading .field { margin: 0; font-size: 11px; }
+.badge { display: inline-block; font: 600 10px var(--sans); color: #446437; background: #edf4e7; padding: 5px 8px; border-radius: 5px; vertical-align: middle; }
+.table { overflow-x: auto; margin-top: 16px; }
+.table table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+.table th { background: #f6f8f3; color: #65765f; font-weight: 500; padding: 12px; white-space: nowrap; }
+.table td { padding: 16px 12px; border-bottom: 1px solid #ebeee7; overflow-wrap: anywhere; }
+.table td small { display: block; color: #75806f; font-size: 10px; margin-top: 5px; }
+.empty { text-align: center; padding: 38px 18px; color: #718067; }
+.confirm { padding: 18px; margin-top: 18px; border: 1px solid #e9ccc4; border-radius: 8px; }
+.confirm button { margin: 0 8px 8px 0; }
+.error { padding: 14px; background: #fff1ee; color: #943d2e; border: 1px solid #eaccc5; border-radius: 8px; }
+.card .number { font: 500 64px var(--serif); margin: 20px 0; }
+.number small { font: 400 16px var(--sans); }
+@media (max-width: 1100px) { .hero { align-items: stretch; flex-direction: column; } .grid { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .hero, .card, .success { padding: 20px; } .hero h3 { font-size: 27px; } .heading { flex-direction: column; align-items: stretch; } .tabs { gap: 18px; } .environments { grid-template-columns: 1fr; } .table table { min-width: 550px; } }
