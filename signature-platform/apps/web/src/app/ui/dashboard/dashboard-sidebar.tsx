@@ -1,16 +1,11 @@
 "use client";
-
 import Link from "next/link";
-
-type DashboardSidebarProps = { userName?: string; open: boolean; onClose: () => void; onLogout: () => void };
-
-export function DashboardSidebar({ userName, open, onClose, onLogout }: DashboardSidebarProps) {
-  const initial = (userName?.[0] ?? "S").toUpperCase();
-  const mainLinks = [["⌂", "Vue d’ensemble", "/dashboard"], ["▣", "Documents", "/dashboard/documents"], ["✎", "Signatures", "/dashboard/enveloppes"], ["◌", "Modèles", "/dashboard/modeles"]];
-  return <aside className={open ? "dashboard-sidebar open" : "dashboard-sidebar"}>
-    <Link href="/" className="brand dashboard-brand" aria-label="Signeo, accueil"><span className="brand-mark" aria-hidden="true">s.</span>signeo</Link>
-    <div className="sidebar-workspace"><span className="workspace-avatar">{initial}</span><span><b>{userName ?? "Mon espace"}</b><small>Espace personnel</small></span><span className="workspace-chevron">⌄</span></div>
-    <nav className="dashboard-nav" aria-label="Navigation du tableau de bord"><p className="sidebar-label">ESPACE DE TRAVAIL</p>{mainLinks.map(([icon, label, href]) => <a href={href} key={label} onClick={onClose}><span aria-hidden="true">{icon}</span>{label}</a>)}<p className="sidebar-label sidebar-label-spaced">OUTILS</p><a href="/dashboard/contacts"><span aria-hidden="true">♧</span>Contacts</a><a href="/dashboard/activite"><span aria-hidden="true">◷</span>Activité</a></nav>
-    <div className="sidebar-bottom"><a href="/dashboard/aide"><span aria-hidden="true">?</span>Aide</a><a href="/dashboard/parametres"><span aria-hidden="true">⚙</span>Paramètres</a><a href="/dashboard/developpeurs"><span aria-hidden="true">⌘</span>Développeurs</a><button type="button" onClick={onLogout}><span aria-hidden="true">↪</span>Se déconnecter</button></div>
-  </aside>;
+import { ChangeEvent } from "react";
+type Workspace = { id: string; name: string; role: string };
+type Props = { userName?: string; activeWorkspace?: Workspace; workspaces?: Workspace[]; open: boolean; onClose: () => void; onLogout: () => void };
+export function DashboardSidebar({ userName, activeWorkspace, workspaces = [], open, onClose, onLogout }: Props) {
+  const initial = (userName?.[0] ?? "S").toUpperCase(); const links = [["⌂", "Vue d’ensemble", "/dashboard"], ["▣", "Documents", "/dashboard/documents"], ["✎", "Signatures", "/dashboard/enveloppes"], ["◌", "Modèles", "/dashboard/modeles"]];
+  async function selectWorkspace(event: ChangeEvent<HTMLSelectElement>) { const token = localStorage.getItem("signeo_access_token"); if (!token || event.target.value === activeWorkspace?.id) return; const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/workspaces/select`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ workspaceId: event.target.value }) }); if (response.ok) window.location.reload(); }
+  const role = activeWorkspace?.role === "ADMIN" ? "Administrateur" : activeWorkspace?.role === "VIEWER" ? "Lecteur" : "Membre";
+  return <aside className={open ? "dashboard-sidebar open" : "dashboard-sidebar"}><Link href="/" className="brand dashboard-brand" aria-label="Signeo, accueil"><span className="brand-mark">s.</span>signeo</Link><div className="sidebar-workspace"><span className="workspace-avatar">{initial}</span><span><b>{activeWorkspace?.name ?? userName ?? "Mon espace"}</b><small>{role}</small></span></div>{workspaces.length > 1 && <select className="workspace-switcher" value={activeWorkspace?.id} onChange={selectWorkspace} aria-label="Changer d’espace">{workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select>}<nav className="dashboard-nav"><p className="sidebar-label">ESPACE DE TRAVAIL</p>{links.map(([icon, label, href]) => <a href={href} key={label} onClick={onClose}><span>{icon}</span>{label}</a>)}<a href="/dashboard/equipe" onClick={onClose}><span>☻</span>Équipe</a><p className="sidebar-label sidebar-label-spaced">OUTILS</p><a href="/dashboard/contacts"><span>♧</span>Contacts</a><a href="/dashboard/activite"><span>◷</span>Activité</a></nav><div className="sidebar-bottom"><a href="/dashboard/aide">Aide</a><a href="/dashboard/parametres">Paramètres</a><button type="button" onClick={onLogout}>Se déconnecter</button></div></aside>;
 }

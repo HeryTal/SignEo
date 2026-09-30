@@ -5,10 +5,12 @@ import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { User } from '../users/user.entity.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
+import { WorkspacesModule } from '../workspaces/workspaces.module.js';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User]),
+    WorkspacesModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET ?? 'local-development-secret-change-me',
       signOptions: { expiresIn: '7d' },

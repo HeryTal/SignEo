@@ -4,12 +4,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { hash, compare } from 'bcryptjs';
 import { Repository } from 'typeorm';
 import { User, type UserBranding } from '../users/user.entity.js';
+import { WorkspacesService } from '../workspaces/workspaces.service.js';
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly jwt: JwtService,
+    private readonly workspaces: WorkspacesService,
   ) {}
 
   async signup(name: string, email: string, password: string) {
@@ -23,6 +25,7 @@ export class AuthService {
       passwordHash: await hash(password, 12),
     });
     await this.users.save(user);
+    await this.workspaces.createPersonalWorkspace(user);
     return this.issueToken(user);
   }
 
@@ -37,11 +40,13 @@ export class AuthService {
   async getProfile(id: string) {
     const user = await this.users.findOne({ where: { id } });
     if (!user) throw new UnauthorizedException('Utilisateur introuvable.');
+    const workspace = await this.workspaces.profile(id);
     return {
       id: user.id,
       name: user.name,
       email: user.email,
       branding: this.normalizeBranding(user.branding),
+      ...workspace,
     };
   }
 

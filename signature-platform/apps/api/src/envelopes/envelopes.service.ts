@@ -24,6 +24,8 @@ import { SignPdf } from '@signpdf/signpdf';
 import { SUBFILTER_ETSI_CADES_DETACHED } from '@signpdf/utils';
 import { Cron } from '@nestjs/schedule';
 import { MailService } from './mail.service.js';
+import { WorkspacesService } from '../workspaces/workspaces.service.js';
+import type { WorkspaceMember } from '../workspaces/workspace-member.entity.js';
 
 export type IncomingRecipient = {
   name: string;
@@ -78,6 +80,7 @@ export class EnvelopesService {
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly dataSource: DataSource,
     private readonly mail: MailService,
+    private readonly workspaces: WorkspacesService,
   ) {}
 
   async create(
@@ -228,6 +231,8 @@ export class EnvelopesService {
     }
 
     const owner = await this.users.findOneByOrFail({ id: ownerId });
+    const membership = await this.workspaces.activeForUser(ownerId);
+    this.workspaces.requireWrite(membership.role);
     for (const recipient of recipientsInput) {
       if (!['SIMPLE', 'ADVANCED', 'QUALIFIED'].includes(recipient.signatureLevel ?? 'SIMPLE'))
         throw new BadRequestException('Niveau de signature invalide.');
@@ -321,6 +326,7 @@ export class EnvelopesService {
           }),
         ),
         owner,
+        workspace: membership.workspace,
         documents: documentEntities,
         recipients: recipientsInput.map((recipient, index) =>
           this.recipients.create({
@@ -363,21 +369,24 @@ export class EnvelopesService {
   }
 
   async list(ownerId: string) {
-    const items = await this.envelopes.find({
-      where: { owner: { id: ownerId } },
-      relations: { documents: true, recipients: true },
-      order: { createdAt: 'DESC' },
-    });
+    const membership = await this.workspaces.activeForUser(ownerId);
+    const items = await this.envelopes.createQueryBuilder('envelope')
+      .leftJoinAndSelect('envelope.documents', 'documents')
+      .leftJoinAndSelect('envelope.recipients', 'recipients')
+      .where('envelope.workspaceId = :workspaceId', { workspaceId: membership.workspace.id })
+      .orWhere('envelope.workspaceId IS NULL AND envelope.ownerId = :ownerId', { ownerId })
+      .orderBy('envelope.createdAt', 'DESC')
+      .getMany();
     return items.map((item) => this.toDto(item));
   }
 
   async activity(ownerId: string) {
-    const events = await this.events.find({
-      where: { envelope: { owner: { id: ownerId } } },
-      relations: { envelope: true },
-      order: { createdAt: 'DESC' },
-      take: 8,
-    });
+    const membership = await this.workspaces.activeForUser(ownerId);
+    const events = await this.events.createQueryBuilder('event')
+      .innerJoinAndSelect('event.envelope', 'envelope')
+      .where('envelope.workspaceId = :workspaceId', { workspaceId: membership.workspace.id })
+      .orWhere('envelope.workspaceId IS NULL AND envelope.ownerId = :ownerId', { ownerId })
+      .orderBy('event.createdAt', 'DESC').take(8).getMany();
     return events.map((event) => ({
       id: event.id,
       action: event.action,
@@ -388,11 +397,12 @@ export class EnvelopesService {
   }
 
   async get(ownerId: string, id: string) {
+    const membership = await this.workspaces.activeForUser(ownerId);
     const envelope = await this.envelopes.findOne({
-      where: { id, owner: { id: ownerId } },
-      relations: { documents: true, recipients: true, events: true },
+      where: { id },
+      relations: { documents: true, recipients: true, events: true, workspace: true, owner: true },
     });
-    if (!envelope) throw new NotFoundException('Enveloppe introuvable.');
+    this.assertReadable(envelope, ownerId, membership);
     if (envelope.status === 'COMPLETED' && envelope.documents.some((document) => !document.signedStorageName)) {
       try { await this.createCryptographicallySignedPdfs(envelope); }
       catch (error) { console.error('PDF cryptographic sealing failed:', error instanceof Error ? error.message : 'Unknown error'); }
@@ -415,14 +425,15 @@ export class EnvelopesService {
     recipientId: string,
     requestId: string,
   ) {
+    const membership = await this.workspaces.activeForUser(ownerId);
     const recipient = await this.recipients.findOne({
       where: {
         id: recipientId,
-        envelope: { id: envelopeId, owner: { id: ownerId } },
+        envelope: { id: envelopeId },
       },
-      relations: { envelope: { owner: true } },
+      relations: { envelope: { owner: true, workspace: true } },
     });
-    if (!recipient) throw new NotFoundException('Document introuvable.');
+    this.assertReadable(recipient?.envelope, ownerId, membership, 'Document introuvable.');
     const file = (recipient.collectionFiles ?? []).find(
       (item) => item.requestId === requestId,
     );
@@ -434,12 +445,14 @@ export class EnvelopesService {
   }
 
   async send(ownerId: string, id: string, webOrigin: string) {
+    const membership = await this.workspaces.activeForUser(ownerId);
+    this.workspaces.requireWrite(membership.role);
     const result = await this.dataSource.transaction(async (manager) => {
       const envelope = await manager.getRepository(Envelope).findOne({
-        where: { id, owner: { id: ownerId } },
-        relations: { documents: true, recipients: true, owner: true },
+        where: { id },
+        relations: { documents: true, recipients: true, owner: true, workspace: true },
       });
-      if (!envelope) throw new NotFoundException('Enveloppe introuvable.');
+      this.assertReadable(envelope, ownerId, membership);
       if (envelope.status !== 'DRAFT')
         throw new BadRequestException('Cette enveloppe a déjà été envoyée.');
       if (
@@ -661,16 +674,20 @@ export class EnvelopesService {
   }
 
   async signedDocument(ownerId: string, envelopeId: string, documentId: string) {
+    const membership = await this.workspaces.activeForUser(ownerId);
     const document = await this.documents.findOne({
-      where: { id: documentId, envelope: { id: envelopeId, owner: { id: ownerId } } },
+      where: { id: documentId, envelope: { id: envelopeId } },
+      relations: { envelope: { owner: true, workspace: true } },
     });
+    this.assertReadable(document?.envelope, ownerId, membership);
     if (!document?.signedStorageName) throw new NotFoundException('Le PDF signé n’est pas encore disponible. Vérifiez le certificat côté serveur.');
     return { document, path: join(this.uploadDirectory, document.signedStorageName) };
   }
 
   async auditTrail(ownerId: string, envelopeId: string) {
-    const envelope = await this.envelopes.findOne({ where: { id: envelopeId, owner: { id: ownerId } }, relations: { recipients: true, events: true, documents: true } });
-    if (!envelope) throw new NotFoundException('Enveloppe introuvable.');
+    const membership = await this.workspaces.activeForUser(ownerId);
+    const envelope = await this.envelopes.findOne({ where: { id: envelopeId }, relations: { recipients: true, events: true, documents: true, owner: true, workspace: true } });
+    this.assertReadable(envelope, ownerId, membership);
     return {
       envelope: { id: envelope.id, title: envelope.title, status: envelope.status, createdAt: envelope.createdAt, expiresAt: envelope.expiresAt },
       recipients: envelope.recipients.map((recipient) => ({ name: recipient.name, email: recipient.email, role: recipient.role, status: recipient.status, viewedAt: recipient.viewedAt, signedAt: recipient.signedAt })),
@@ -885,6 +902,19 @@ export class EnvelopesService {
       throw new BadRequestException(
         'Chaque document doit faire 50 Mo maximum.',
       );
+  }
+
+  private assertReadable(
+    envelope: Envelope | null | undefined,
+    userId: string,
+    membership: WorkspaceMember,
+    message = 'Enveloppe introuvable.',
+  ): asserts envelope is Envelope {
+    if (!envelope) throw new NotFoundException(message);
+    const workspaceId = envelope.workspace?.id;
+    if (workspaceId ? workspaceId !== membership.workspace.id : envelope.owner?.id !== userId) {
+      throw new NotFoundException(message);
+    }
   }
 
   private toDto(envelope: Envelope) {

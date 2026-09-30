@@ -13,6 +13,7 @@ import { EnvelopeDocument } from './envelope-document.entity.js';
 import { Recipient } from './recipient.entity.js';
 import { AuditEvent } from './audit-event.entity.js';
 import type { UserBranding } from '../users/user.entity.js';
+import { Workspace } from '../workspaces/workspace.entity.js';
 
 export type EnvelopeStatus =
   'DRAFT' | 'SENT' | 'PARTIALLY_SIGNED' | 'COMPLETED' | 'VOIDED' | 'EXPIRED';
@@ -85,6 +86,8 @@ export class Envelope {
   allowDecline!: boolean;
   @ManyToOne(() => User, { nullable: false, onDelete: 'CASCADE' })
   owner!: Relation<User>;
+  @ManyToOne(() => Workspace, { nullable: true, onDelete: 'SET NULL' })
+  workspace!: Relation<Workspace> | null;
   @OneToMany(() => EnvelopeDocument, (document) => document.envelope, {
     cascade: true,
   })

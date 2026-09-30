@@ -5,6 +5,8 @@ import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
 import { EnvelopesModule } from './envelopes/envelopes.module.js';
+import { WorkspacesModule } from './workspaces/workspaces.module.js';
+import { DeveloperModule } from './developer/developer.module.js';
 
 @Module({
   imports: [
@@ -21,6 +23,8 @@ import { EnvelopesModule } from './envelopes/envelopes.module.js';
       ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
     }),
     AuthModule,
+    WorkspacesModule,
+    DeveloperModule,
     EnvelopesModule,
   ],
   controllers: [AppController],

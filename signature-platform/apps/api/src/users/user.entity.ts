@@ -26,6 +26,9 @@ export class User {
   @Column({ name: 'password_hash' })
   passwordHash!: string;
 
+  @Column({ name: 'active_workspace_id', type: 'uuid', nullable: true })
+  activeWorkspaceId!: string | null;
+
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   branding!: UserBranding;
 

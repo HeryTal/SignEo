@@ -9,9 +9,10 @@ import { EnvelopesController } from './envelopes.controller.js';
 import { EnvelopesService } from './envelopes.service.js';
 import { Recipient } from './recipient.entity.js';
 import { MailService } from './mail.service.js';
+import { WorkspacesModule } from '../workspaces/workspaces.module.js';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Envelope, EnvelopeDocument, Recipient, AuditEvent, User]), AuthModule],
+  imports: [TypeOrmModule.forFeature([Envelope, EnvelopeDocument, Recipient, AuditEvent, User]), AuthModule, WorkspacesModule],
   controllers: [EnvelopesController],
   providers: [EnvelopesService, MailService],
 })
