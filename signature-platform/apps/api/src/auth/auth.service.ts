@@ -2,10 +2,11 @@ import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/co
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { hash, compare } from 'bcryptjs';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { User, type UserBranding } from '../users/user.entity.js';
 import { WorkspacesService } from '../workspaces/workspaces.service.js';
+import { AuthMailService } from './auth-mail.service.js';
 
 @Injectable()
 export class AuthService {
@@ -14,6 +15,7 @@ export class AuthService {
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly jwt: JwtService,
     private readonly workspaces: WorkspacesService,
+    private readonly mail: AuthMailService,
   ) {}
 
   async signup(name: string, email: string, password: string) {
@@ -37,6 +39,31 @@ export class AuthService {
       throw new UnauthorizedException('Adresse e-mail ou mot de passe incorrect.');
     }
     return this.issueToken(user);
+  }
+
+  async requestPasswordReset(email: string, webOrigin: string) {
+    const user = await this.users.findOne({ where: { email: email.trim().toLowerCase() } });
+    // Deliberately identical response: this endpoint must not reveal registered addresses.
+    if (!user) return { accepted: true };
+    const token = randomBytes(32).toString('base64url');
+    user.passwordResetTokenHash = createHash('sha256').update(token).digest('hex');
+    user.passwordResetExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    await this.users.save(user);
+    await this.mail.sendPasswordReset(user.email, user.name, `${webOrigin}/connexion?reset=${encodeURIComponent(token)}`);
+    return { accepted: true };
+  }
+
+  async resetPassword(token: string, password: string) {
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const user = await this.users.findOne({ where: { passwordResetTokenHash: tokenHash } });
+    if (!user || !user.passwordResetExpiresAt || user.passwordResetExpiresAt.getTime() < Date.now()) {
+      throw new UnauthorizedException('Ce lien de réinitialisation est invalide ou expiré.');
+    }
+    user.passwordHash = await hash(password, 12);
+    user.passwordResetTokenHash = null;
+    user.passwordResetExpiresAt = null;
+    await this.users.save(user);
+    return { reset: true };
   }
 
   async loginWithGoogle(name: string, email: string) {

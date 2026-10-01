@@ -14,6 +14,9 @@ export default function AuthPage({ mode }: AuthPageProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [accountCreated, setAccountCreated] = useState(false);
+  const [passwordResetMode, setPasswordResetMode] = useState(false);
+  const [resetToken, setResetToken] = useState("");
+  const [resetNotice, setResetNotice] = useState("");
   const googleExchangeStarted = useRef(false);
   const router = useRouter();
 
@@ -23,6 +26,8 @@ export default function AuthPage({ mode }: AuthPageProps) {
       setAccountCreated(true);
     }
     const googleCode = query.get("google_code");
+    const passwordResetToken = query.get("reset");
+    if (passwordResetToken) { setResetToken(passwordResetToken); setPasswordResetMode(true); }
     const googleError = query.get("google_error");
     if (googleError) {
       setError(googleError === "cancelled" ? "La connexion Google a été annulée." : "La connexion Google n’a pas pu être validée. Réessayez.");
@@ -62,6 +67,31 @@ export default function AuthPage({ mode }: AuthPageProps) {
 
   function loginWithGoogle() {
     window.location.assign(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/auth/google`);
+  }
+
+  async function requestPasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError(""); setLoading(true);
+    const email = String(new FormData(event.currentTarget).get("email") ?? "");
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/auth/password-reset/request`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+      if (!response.ok) throw new Error("Impossible d’envoyer le lien pour le moment.");
+      setResetNotice("Si cette adresse est connue, un lien valable une heure vient d’être envoyé.");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Erreur réseau."); }
+    finally { setLoading(false); }
+  }
+
+  async function confirmPasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError("");
+    const values = new FormData(event.currentTarget); const password = String(values.get("password") ?? "");
+    if (password !== String(values.get("passwordConfirmation") ?? "")) { setError("Les deux mots de passe doivent être identiques."); return; }
+    setLoading(true);
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/auth/password-reset/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: resetToken, password }) });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.message ?? "Impossible de modifier le mot de passe.");
+      setResetNotice("Mot de passe modifié. Vous pouvez maintenant vous connecter."); setPasswordResetMode(false); setResetToken(""); window.history.replaceState({}, "", "/connexion");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Erreur réseau."); }
+    finally { setLoading(false); }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -118,6 +148,13 @@ export default function AuthPage({ mode }: AuthPageProps) {
           <p className="auth-intro">{isSignup ? "Un point de départ simple pour vos prochains accords." : "Connectez-vous pour retrouver vos projets."}</p>
           {accountCreated && <p className="auth-success" role="status">Votre espace est créé. Connectez-vous pour commencer.</p>}
 
+          {passwordResetMode ? <form className="auth-form" onSubmit={resetToken ? confirmPasswordReset : requestPasswordReset}>
+            <p className="auth-intro">{resetToken ? "Choisissez un nouveau mot de passe pour votre compte." : "Indiquez votre adresse e-mail. Nous vous enverrons un lien sécurisé."}</p>
+            {!resetToken && <div className="auth-field"><label htmlFor="reset-email">Adresse e-mail</label><input id="reset-email" name="email" type="email" autoComplete="email" placeholder="vous@exemple.fr" required /></div>}
+            {resetToken && <><div className="auth-field"><label htmlFor="reset-password">Nouveau mot de passe</label><input id="reset-password" name="password" type="password" autoComplete="new-password" minLength={8} placeholder="8 caractères minimum" required /></div><div className="auth-field"><label htmlFor="reset-password-confirmation">Confirmez le mot de passe</label><input id="reset-password-confirmation" name="passwordConfirmation" type="password" autoComplete="new-password" minLength={8} required /></div></>}
+            <button className="button auth-submit" type="submit" disabled={loading}>{loading ? "Envoi…" : resetToken ? "Enregistrer le mot de passe" : "Envoyer le lien"}<span aria-hidden="true">↗</span></button>
+            <button type="button" className="auth-text-button" onClick={() => { setPasswordResetMode(false); setResetToken(""); }}>← Retour à la connexion</button>
+          </form> : <>
           <button className="google-auth-button" type="button" onClick={loginWithGoogle} disabled={loading}>
             <svg className="google-auth-icon" viewBox="0 0 24 24" aria-hidden="true">
               <path fill="#4285F4" d="M21.35 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.24a4.48 4.48 0 0 1-1.94 2.94v2.51h3.14c1.84-1.69 2.91-4.18 2.91-7.28Z" />
@@ -133,14 +170,15 @@ export default function AuthPage({ mode }: AuthPageProps) {
             {isSignup && <div className="auth-field"><label htmlFor="full-name">Prénom et nom</label><input id="full-name" name="name" type="text" autoComplete="name" placeholder="Camille Martin" required /></div>}
             <div className="auth-field"><label htmlFor="email">Adresse e-mail</label><input id="email" name="email" type="email" autoComplete="email" placeholder="vous@exemple.fr" required /></div>
             <div className="auth-field">
-              <div className="auth-label-row"><label htmlFor="password">Mot de passe</label>{!isSignup && <button className="auth-text-button" type="button" onClick={() => setError("La récupération du mot de passe sera bientôt disponible.")}>Mot de passe oublié ?</button>}</div>
+              <div className="auth-label-row"><label htmlFor="password">Mot de passe</label>{!isSignup && <button className="auth-text-button" type="button" onClick={() => { setError(""); setResetNotice(""); setPasswordResetMode(true); }}>Mot de passe oublié ?</button>}</div>
               <div className="auth-password"><input id="password" name="password" type={showPassword ? "text" : "password"} autoComplete={isSignup ? "new-password" : "current-password"} minLength={8} placeholder="8 caractères minimum" required /><button type="button" className="auth-reveal" aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? "Masquer" : "Afficher"}</button></div>
             </div>
             {isSignup && <label className="auth-consent"><input type="checkbox" required /><span>J’accepte les conditions d’utilisation et la politique de confidentialité.</span></label>}
             {!isSignup && <label className="auth-consent"><input type="checkbox" /><span>Garder ma session ouverte</span></label>}
             <button className="button auth-submit" type="submit" disabled={loading}>{loading ? "Connexion…" : isSignup ? "Créer mon espace" : "Se connecter"}<span aria-hidden="true">↗</span></button>
-          </form>
+          </form></>}
 
+          {resetNotice && <p className="auth-success" role="status">{resetNotice}</p>}
           {error && <p className="auth-error" role="alert">{error}</p>}
           <p className="auth-switch">{isSignup ? "Vous avez déjà un compte ?" : "Pas encore de compte ?"} <Link href={isSignup ? "/connexion" : "/inscription"}>{isSignup ? "Se connecter" : "Créer un espace"}</Link></p>
           <Link className="auth-back" href="/">← Retour au site</Link>

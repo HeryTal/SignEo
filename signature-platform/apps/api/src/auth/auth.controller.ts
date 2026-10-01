@@ -6,6 +6,7 @@ import { GoogleOAuthService } from './google-oauth.service.js';
 
 type SignupBody = { name?: string; email?: string; password?: string };
 type LoginBody = { email?: string; password?: string };
+type PasswordResetBody = { email?: string };
 type BrandingBody = { displayName?: string; accentColor?: string; logoUrl?: string; textFont?: 'SANS' | 'SERIF' | 'MONO'; signatureFont?: 'SCRIPT' | 'SERIF' | 'SANS'; textColor?: string; signatureColor?: string; textSize?: number; signatureSize?: number };
 
 @Controller('auth')
@@ -26,6 +27,20 @@ export class AuthController {
       throw new BadRequestException('E-mail et mot de passe requis.');
     }
     return this.auth.login(body.email, body.password);
+  }
+
+  @Post('password-reset/request')
+  requestPasswordReset(@Body() body: PasswordResetBody) {
+    if (!body.email?.trim()) throw new BadRequestException('Adresse e-mail requise.');
+    return this.auth.requestPasswordReset(body.email, process.env.WEB_ORIGIN ?? 'http://localhost:3000');
+  }
+
+  @Post('password-reset/confirm')
+  confirmPasswordReset(@Body() body: { token?: string; password?: string }) {
+    if (!body.token || !body.password || body.password.length < 8) {
+      throw new BadRequestException('Un lien valide et un mot de passe de 8 caractères minimum sont requis.');
+    }
+    return this.auth.resetPassword(body.token, body.password);
   }
 
   @Get('google')

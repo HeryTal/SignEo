@@ -58,6 +58,46 @@ const FIELD_TYPES = [
   'RADIO',
 ];
 
+function crc32(data: Buffer) {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+// ZIP "store" format: no external dependency and no compression of evidence files.
+function createEvidenceZip(entries: { name: string; data: Buffer }[]) {
+  const local: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name, 'utf8');
+    const checksum = crc32(entry.data);
+    const header = Buffer.alloc(30);
+    header.writeUInt32LE(0x04034b50, 0); header.writeUInt16LE(20, 4); header.writeUInt16LE(0x0800, 6);
+    header.writeUInt16LE(0, 8); header.writeUInt32LE(0, 10); header.writeUInt32LE(checksum, 14);
+    header.writeUInt32LE(entry.data.length, 18); header.writeUInt32LE(entry.data.length, 22);
+    header.writeUInt16LE(name.length, 26); header.writeUInt16LE(0, 28);
+    local.push(header, name, entry.data);
+    const directory = Buffer.alloc(46);
+    directory.writeUInt32LE(0x02014b50, 0); directory.writeUInt16LE(20, 4); directory.writeUInt16LE(20, 6);
+    directory.writeUInt16LE(0x0800, 8); directory.writeUInt16LE(0, 10); directory.writeUInt32LE(0, 12);
+    directory.writeUInt32LE(checksum, 16); directory.writeUInt32LE(entry.data.length, 20); directory.writeUInt32LE(entry.data.length, 24);
+    directory.writeUInt16LE(name.length, 28); directory.writeUInt16LE(0, 30); directory.writeUInt16LE(0, 32);
+    directory.writeUInt16LE(0, 34); directory.writeUInt16LE(0, 36); directory.writeUInt32LE(0, 38); directory.writeUInt32LE(offset, 42);
+    central.push(directory, name);
+    offset += header.length + name.length + entry.data.length;
+  }
+  const centralSize = central.reduce((total, part) => total + part.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(0, 4); end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralSize, 12); end.writeUInt32LE(offset, 16); end.writeUInt16LE(0, 20);
+  return Buffer.concat([...local, ...central, end]);
+}
+
 function isCalendarDate(value: unknown): value is string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(value + 'T00:00:00.000Z');
@@ -495,6 +535,7 @@ export class EnvelopesService {
       return {
         envelope: this.toDto(envelope),
         invitations: envelope.recipients.map((recipient) => ({
+          id: recipient.id,
           name: recipient.name,
           email: recipient.email,
           role: recipient.role,
@@ -513,6 +554,7 @@ export class EnvelopesService {
       action: delivery.delivered ? 'INVITATION_EMAIL_SENT' : 'INVITATION_EMAIL_PENDING',
       details: delivery.delivered ? {} : { reason: delivery.reason },
     }))));
+    await Promise.all(deliveries.filter((delivery) => delivery.delivered).map((delivery) => this.recipients.update(delivery.id, { lastRemindedAt: new Date() })));
     void this.webhooks.dispatch(membership.workspace.id, 'envelope.sent', { envelopeId: id, title: result.envelope.title, status: 'SENT', environment: result.envelope.apiEnvironment });
     return { ...result, deliveries };
   }
@@ -725,6 +767,24 @@ export class EnvelopesService {
       events: envelope.events.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map((event) => ({ action: event.action, actorEmail: event.actorEmail, createdAt: event.createdAt, details: event.details })),
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  async evidenceBundle(ownerId: string, envelopeId: string) {
+    const membership = await this.workspaces.activeForUser(ownerId);
+    let envelope = await this.envelopes.findOne({ where: { id: envelopeId }, relations: { documents: true, recipients: true, events: true, owner: true, workspace: true } });
+    this.assertReadable(envelope, ownerId, membership);
+    if (envelope.status !== 'COMPLETED') throw new BadRequestException('Le dossier de preuve est disponible une fois l’enveloppe terminée.');
+    await this.createCompletedPdfs(envelope);
+    envelope = await this.envelopes.findOneOrFail({ where: { id: envelopeId }, relations: { documents: true, recipients: true, events: true, owner: true, workspace: true } });
+    const audit = await this.auditTrail(ownerId, envelopeId);
+    const entries: { name: string; data: Buffer }[] = [{ name: 'journal-de-preuve.json', data: Buffer.from(JSON.stringify(audit, null, 2), 'utf8') }];
+    for (const [index, document] of this.orderedDocuments(envelope).entries()) {
+      const storageName = document.signedStorageName ?? document.finalStorageName;
+      if (!storageName) continue;
+      const safeName = document.originalName.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || `document-${index + 1}.pdf`;
+      entries.push({ name: `documents/${String(index + 1).padStart(2, '0')}-${safeName.replace(/\.pdf$/i, '')}-final.pdf`, data: await readFile(join(this.uploadDirectory, storageName)) });
+    }
+    return { buffer: createEvidenceZip(entries), filename: `dossier-de-preuve-${envelope.id}.zip` };
   }
 
   async requestEmailOtp(token: string) {
@@ -1128,11 +1188,11 @@ export class EnvelopesService {
     });
     const now = Date.now();
     for (const recipient of pending) {
-      if (recipient.lastRemindedAt && now - recipient.lastRemindedAt.getTime() < 24 * 60 * 60 * 1000) continue;
+      if (recipient.lastRemindedAt && now - recipient.lastRemindedAt.getTime() < 3 * 24 * 60 * 60 * 1000) continue;
       if (recipient.envelope.expiresAt && recipient.envelope.expiresAt.getTime() < now) continue;
       const origin = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
       try {
-        const delivery = await this.mail.sendInvitation({ to: recipient.email, recipientName: recipient.name, envelopeTitle: recipient.envelope.title, signingUrl: `${origin}/signer/${recipient.accessToken}`, expiresAt: recipient.envelope.expiresAt });
+        const delivery = await this.mail.sendReminder({ to: recipient.email, recipientName: recipient.name, envelopeTitle: recipient.envelope.title, signingUrl: `${origin}/signer/${recipient.accessToken}`, expiresAt: recipient.envelope.expiresAt });
         if (!delivery.delivered) continue;
         recipient.lastRemindedAt = new Date();
         await this.recipients.save(recipient);

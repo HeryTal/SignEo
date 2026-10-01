@@ -138,6 +138,15 @@ export class EnvelopesController {
     return this.envelopes.auditTrail(request.user.sub, id);
   }
 
+  @Get('envelopes/:id/evidence-bundle')
+  @UseGuards(JwtAuthGuard)
+  async evidenceBundle(@Req() request: AuthenticatedRequest, @Param('id') id: string, @Res({ passthrough: true }) response: Response) {
+    const bundle = await this.envelopes.evidenceBundle(request.user.sub, id);
+    response.setHeader('Content-Type', 'application/zip');
+    response.setHeader('Content-Disposition', `attachment; filename="${bundle.filename}"`);
+    return new StreamableFile(bundle.buffer);
+  }
+
   @Post('envelopes')
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(

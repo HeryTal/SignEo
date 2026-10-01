@@ -38,6 +38,13 @@ export class MailService {
     return { delivered: true };
   }
 
+  async sendReminder(mail: InvitationMail) {
+    if (!this.configured) return { delivered: false, reason: 'SMTP_NOT_CONFIGURED' as const };
+    const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT ?? 587), secure: process.env.SMTP_SECURE === 'true', auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } : undefined });
+    await transport.sendMail({ from: process.env.SMTP_FROM, to: mail.to, subject: `Rappel de signature — ${mail.envelopeTitle}`, text: `Bonjour ${mail.recipientName},\n\nLe document « ${mail.envelopeTitle} » attend toujours votre action.\n\nOuvrir le dossier : ${mail.signingUrl}${mail.expiresAt ? `\n\nExpiration : ${mail.expiresAt.toLocaleDateString('fr-FR')}` : ''}` });
+    return { delivered: true };
+  }
+
   async sendOtp(to: string, recipientName: string, envelopeTitle: string, code: string) {
     if (!this.configured) return { delivered: false, reason: 'SMTP_NOT_CONFIGURED' as const };
     const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT ?? 587), secure: process.env.SMTP_SECURE === 'true', auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } : undefined });

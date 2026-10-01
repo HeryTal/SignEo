@@ -105,6 +105,14 @@ export default function EnvelopeDetailPage() {
     const anchor = document.createElement("a"); anchor.href = objectUrl; anchor.download = `journal-de-preuve-${id}.json`; anchor.click(); URL.revokeObjectURL(objectUrl);
   }
 
+  async function downloadEvidenceBundle() {
+    const token = localStorage.getItem("signeo_access_token");
+    const response = await fetch(`${API}/envelopes/${id}/evidence-bundle`, { headers: { Authorization: `Bearer ${token ?? ""}` } });
+    if (!response.ok) { const payload = await response.json().catch(() => null); setError(payload?.message ?? "Impossible de préparer le dossier de preuve."); return; }
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement("a"); anchor.href = objectUrl; anchor.download = `dossier-de-preuve-${id}.zip`; anchor.click(); URL.revokeObjectURL(objectUrl);
+  }
+
   return (
     <DashboardLayout
       title={item?.title ?? "Détail de l’enveloppe"}
@@ -161,7 +169,7 @@ export default function EnvelopeDetailPage() {
             <p className="detail-date">
               Créée le {new Date(item.createdAt).toLocaleString("fr-FR")}
             </p>
-            {item.status === "COMPLETED" && <button type="button" className="download-collected-file" onClick={downloadAuditTrail}>Télécharger le journal de preuve</button>}
+            {item.status === "COMPLETED" && <div className="detail-download-actions"><button type="button" className="download-collected-file" onClick={downloadEvidenceBundle}>Télécharger le dossier de preuve (.zip)</button><button type="button" className="download-collected-file" onClick={downloadAuditTrail}>Télécharger le journal JSON</button></div>}
           </section>
           <section className="detail-card">
             <p className="eyebrow">PIÈCES JUSTIFICATIVES REÇUES</p>

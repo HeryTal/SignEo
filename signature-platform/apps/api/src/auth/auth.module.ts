@@ -7,6 +7,7 @@ import { User } from '../users/user.entity.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
 import { WorkspacesModule } from '../workspaces/workspaces.module.js';
 import { GoogleOAuthService } from './google-oauth.service.js';
+import { AuthMailService } from './auth-mail.service.js';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { GoogleOAuthService } from './google-oauth.service.js';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, GoogleOAuthService, JwtAuthGuard],
+  providers: [AuthService, GoogleOAuthService, AuthMailService, JwtAuthGuard],
   exports: [JwtAuthGuard, JwtModule],
 })
 export class AuthModule {}

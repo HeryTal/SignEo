@@ -26,6 +26,12 @@ export class User {
   @Column({ name: 'password_hash' })
   passwordHash!: string;
 
+  @Column({ name: 'password_reset_token_hash', type: 'varchar', length: 64, nullable: true })
+  passwordResetTokenHash!: string | null;
+
+  @Column({ name: 'password_reset_expires_at', type: 'timestamptz', nullable: true })
+  passwordResetExpiresAt!: Date | null;
+
   @Column({ name: 'active_workspace_id', type: 'uuid', nullable: true })
   activeWorkspaceId!: string | null;
 
