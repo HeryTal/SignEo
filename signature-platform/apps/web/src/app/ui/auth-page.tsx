@@ -52,7 +52,7 @@ export default function AuthPage({ mode }: AuthPageProps) {
       const token = localStorage.getItem("signeo_access_token");
       if (token) {
         fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-          .then((response) => { if (response.ok) router.replace("/dashboard"); })
+          .then(() => undefined)
           // Si l'API est momentanément arrêtée, on laisse le formulaire accessible.
           // La connexion affichera ensuite un message utile au lieu d'une rejection non gérée.
           .catch(() => undefined);
