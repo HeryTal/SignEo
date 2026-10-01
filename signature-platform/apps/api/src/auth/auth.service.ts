@@ -2,12 +2,14 @@ import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/co
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { hash, compare } from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { User, type UserBranding } from '../users/user.entity.js';
 import { WorkspacesService } from '../workspaces/workspaces.service.js';
 
 @Injectable()
 export class AuthService {
+  private readonly googleLoginCodes = new Map<string, { token: ReturnType<AuthService['issueToken']>; expiresAt: number }>();
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly jwt: JwtService,
@@ -35,6 +37,40 @@ export class AuthService {
       throw new UnauthorizedException('Adresse e-mail ou mot de passe incorrect.');
     }
     return this.issueToken(user);
+  }
+
+  async loginWithGoogle(name: string, email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    let user = await this.users.findOne({ where: { email: normalizedEmail } });
+
+    if (!user) {
+      user = this.users.create({
+        name: name.trim().slice(0, 120) || normalizedEmail.split('@')[0],
+        email: normalizedEmail,
+        // Google validates this identity. A random value makes password login unavailable
+        // until a password-reset flow is implemented.
+        passwordHash: await hash(randomBytes(32).toString('hex'), 12),
+      });
+      await this.users.save(user);
+      await this.workspaces.createPersonalWorkspace(user);
+    }
+
+    return this.issueToken(user);
+  }
+
+  createGoogleLoginCode(token: ReturnType<AuthService['issueToken']>) {
+    const code = randomBytes(32).toString('base64url');
+    this.googleLoginCodes.set(code, { token, expiresAt: Date.now() + 60_000 });
+    return code;
+  }
+
+  exchangeGoogleLoginCode(code: string) {
+    const entry = this.googleLoginCodes.get(code);
+    this.googleLoginCodes.delete(code);
+    if (!entry || entry.expiresAt < Date.now()) {
+      throw new UnauthorizedException('Ce lien de connexion Google a expiré. Recommencez.');
+    }
+    return entry.token;
   }
 
   async getProfile(id: string) {

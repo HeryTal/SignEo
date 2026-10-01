@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 type AuthPageProps = { mode: "login" | "signup" };
@@ -13,11 +13,39 @@ export default function AuthPage({ mode }: AuthPageProps) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [accountCreated, setAccountCreated] = useState(false);
+  const googleExchangeStarted = useRef(false);
   const router = useRouter();
 
   useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
     if (!isSignup && new URLSearchParams(window.location.search).get("created") === "1") {
       setAccountCreated(true);
+    }
+    const googleCode = query.get("google_code");
+    const googleError = query.get("google_error");
+    if (googleError) {
+      setError(googleError === "cancelled" ? "La connexion Google a été annulée." : "La connexion Google n’a pas pu être validée. Réessayez.");
+    }
+    if (googleCode && !googleExchangeStarted.current) {
+      googleExchangeStarted.current = true;
+      setLoading(true);
+      fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/auth/google/exchange`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: googleCode }),
+      })
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.message ?? "La connexion Google a expiré. Réessayez.");
+          localStorage.setItem("signeo_access_token", payload.accessToken);
+          localStorage.setItem("signeo_user", JSON.stringify(payload.user));
+          router.replace("/dashboard");
+        })
+        .catch(() => {
+          setError("La connexion Google a expiré. Réessayez.");
+          setLoading(false);
+        });
+      return;
     }
     if (!isSignup) {
       const token = localStorage.getItem("signeo_access_token");
@@ -30,6 +58,10 @@ export default function AuthPage({ mode }: AuthPageProps) {
       }
     }
   }, [isSignup, router]);
+
+  function loginWithGoogle() {
+    window.location.assign(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/auth/google`);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -86,6 +118,17 @@ export default function AuthPage({ mode }: AuthPageProps) {
           <h2 id="auth-title">{isSignup ? "Créez votre espace." : "Ravi de vous revoir."}</h2>
           <p className="auth-intro">{isSignup ? "Un point de départ simple pour vos prochains accords." : "Connectez-vous pour retrouver vos projets."}</p>
           {accountCreated && <p className="auth-success" role="status">Votre espace est créé. Connectez-vous pour commencer.</p>}
+
+          <button className="google-auth-button" type="button" onClick={loginWithGoogle} disabled={loading}>
+            <svg className="google-auth-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="#4285F4" d="M21.35 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.24a4.48 4.48 0 0 1-1.94 2.94v2.51h3.14c1.84-1.69 2.91-4.18 2.91-7.28Z" />
+              <path fill="#34A853" d="M12 21.75c2.63 0 4.84-.87 6.45-2.24l-3.14-2.51c-.87.58-1.99.92-3.31.92-2.54 0-4.69-1.71-5.46-4.01H3.3v2.59A9.75 9.75 0 0 0 12 21.75Z" />
+              <path fill="#FBBC05" d="M6.54 13.91A5.87 5.87 0 0 1 6.23 12c0-.66.11-1.3.31-1.91V7.5H3.3A9.75 9.75 0 0 0 2.25 12c0 1.62.39 3.15 1.05 4.5l3.24-2.59Z" />
+              <path fill="#EA4335" d="M12 6.08c1.44 0 2.73.5 3.75 1.48l2.81-2.81C16.84 3.13 14.63 2.25 12 2.25A9.75 9.75 0 0 0 3.3 7.5l3.24 2.59c.77-2.3 2.92-4.01 5.46-4.01Z" />
+            </svg>
+            Continuer avec Google
+          </button>
+          <div className="auth-divider"><span>ou avec votre e-mail</span></div>
 
           <form className="auth-form" onSubmit={handleSubmit}>
             {isSignup && <div className="auth-field"><label htmlFor="full-name">Prénom et nom</label><input id="full-name" name="name" type="text" autoComplete="name" placeholder="Camille Martin" required /></div>}

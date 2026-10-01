@@ -1,6 +1,8 @@
-import { BadRequestException, Body, Controller, Get, Patch, Post, Request, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Patch, Post, Query, Request, Res, UseGuards } from '@nestjs/common';
+import type { Request as ExpressRequest, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
+import { GoogleOAuthService } from './google-oauth.service.js';
 
 type SignupBody = { name?: string; email?: string; password?: string };
 type LoginBody = { email?: string; password?: string };
@@ -8,7 +10,7 @@ type BrandingBody = { displayName?: string; accentColor?: string; logoUrl?: stri
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(private readonly auth: AuthService, private readonly google: GoogleOAuthService) {}
 
   @Post('signup')
   signup(@Body() body: SignupBody) {
@@ -24,6 +26,50 @@ export class AuthController {
       throw new BadRequestException('E-mail et mot de passe requis.');
     }
     return this.auth.login(body.email, body.password);
+  }
+
+  @Get('google')
+  googleLogin(@Res() response: Response) {
+    const { state, url } = this.google.begin();
+    response.cookie('signeo_google_oauth_state', state, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 10 * 60 * 1000,
+      path: '/auth/google',
+    });
+    response.redirect(url);
+  }
+
+  @Get('google/callback')
+  async googleCallback(
+    @Query('code') code: string | undefined,
+    @Query('state') state: string | undefined,
+    @Query('error') error: string | undefined,
+    @Request() request: ExpressRequest,
+    @Res() response: Response,
+  ) {
+    const webOrigin = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
+    response.clearCookie('signeo_google_oauth_state', { path: '/auth/google' });
+    if (error || !code || !state) {
+      return response.redirect(`${webOrigin}/connexion?google_error=cancelled`);
+    }
+
+    try {
+      this.google.verifyState(state, this.readCookie(request, 'signeo_google_oauth_state'));
+      const identity = await this.google.getIdentity(code);
+      const token = await this.auth.loginWithGoogle(identity.name, identity.email);
+      const loginCode = this.auth.createGoogleLoginCode(token);
+      return response.redirect(`${webOrigin}/connexion?google_code=${encodeURIComponent(loginCode)}`);
+    } catch {
+      return response.redirect(`${webOrigin}/connexion?google_error=failed`);
+    }
+  }
+
+  @Post('google/exchange')
+  googleExchange(@Body() body: { code?: string }) {
+    if (!body.code) throw new BadRequestException('Code de connexion Google requis.');
+    return this.auth.exchangeGoogleLoginCode(body.code);
   }
 
   @Get('me')
@@ -69,5 +115,10 @@ export class AuthController {
       textSize: body.textSize!,
       signatureSize: body.signatureSize!,
     });
+  }
+
+  private readCookie(request: ExpressRequest, name: string) {
+    const value = request.headers.cookie?.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
+    return value?.slice(name.length + 1);
   }
 }
