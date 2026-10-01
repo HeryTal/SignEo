@@ -30,6 +30,10 @@ export class Recipient {
   viewedAt!: Date | null;
   @Column({ name: 'last_reminded_at', type: 'timestamptz', nullable: true })
   lastRemindedAt!: Date | null;
+  @Column({ name: 'otp_hash', type: 'varchar', length: 255, nullable: true }) otpHash!: string | null;
+  @Column({ name: 'otp_expires_at', type: 'timestamptz', nullable: true }) otpExpiresAt!: Date | null;
+  @Column({ name: 'otp_verified_at', type: 'timestamptz', nullable: true }) otpVerifiedAt!: Date | null;
+  @Column({ name: 'otp_attempts', type: 'int', default: 0 }) otpAttempts!: number;
   @Column({ name: 'collection_files', type: 'jsonb', default: [] })
   collectionFiles!: {
     requestId: string;

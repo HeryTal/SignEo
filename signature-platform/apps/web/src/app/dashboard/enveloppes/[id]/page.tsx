@@ -14,7 +14,7 @@ type Detail = {
   status: string;
   cryptographicPdfEnabled: boolean;
   createdAt: string;
-  documents: { id: string; name: string; size: number; signedPdfAvailable: boolean }[];
+  documents: { id: string; name: string; size: number; finalPdfAvailable: boolean; signedPdfAvailable: boolean }[];
   recipients: {
     id: string;
     name: string;
@@ -155,7 +155,7 @@ export default function EnvelopeDetailPage() {
                 <span>▤</span>
                 <b>{doc.name}</b>
                 <small>{(doc.size / 1024 / 1024).toFixed(2)} Mo</small>
-                {item.status === "COMPLETED" && (doc.name.toLowerCase().endsWith(".pdf") ? <button type="button" className="download-collected-file" disabled={!doc.signedPdfAvailable} onClick={() => downloadSigned(doc.id, doc.name)}>{doc.signedPdfAvailable ? "Télécharger le PDF signé" : item.cryptographicPdfEnabled ? "Scellement à vérifier" : "Certificat à configurer"}</button> : <small>Le scellement n’est disponible que pour les PDF.</small>)}
+                {item.status === "COMPLETED" && (doc.name.toLowerCase().endsWith(".pdf") ? <button type="button" className="download-collected-file" disabled={!doc.finalPdfAvailable} onClick={() => downloadSigned(doc.id, doc.name)}>{doc.signedPdfAvailable ? "Télécharger le PDF signé" : doc.finalPdfAvailable ? "Télécharger le PDF final" : "Génération en cours…"}</button> : <small>Le PDF final est disponible pour les documents PDF.</small>)}
               </article>
             ))}
             <p className="detail-date">

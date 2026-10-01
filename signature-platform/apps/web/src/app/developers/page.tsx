@@ -82,7 +82,7 @@ console.log(data);`}/>
         </section>
         <section id="limites">
           <span className={styles.label}>05 · DISPONIBILITÉ</span><h2>Ce que vous pouvez utiliser aujourd’hui.</h2>
-          <ul><li>Lecture des enveloppes : disponible, avec 60 requêtes par minute par clé.</li><li>Sandbox et Production : deux types de clés qui accèdent actuellement aux mêmes données de l’espace.</li><li>Création et envoi via l’API publique, webhooks : pas encore disponibles.</li><li>Limiteur : compteurs en mémoire par serveur, réinitialisés au redémarrage. Redis n’est pas encore raccordé.</li></ul>
+          <ul><li>Lecture, création et envoi : disponibles selon les permissions de la clé.</li><li>Sandbox et Production : les enveloppes créées par API sont séparées par environnement.</li><li>Webhooks : disponibles pour les événements de création, envoi et fin d’enveloppe.</li><li>Limiteur : Redis partage les compteurs entre serveurs lorsque <code>REDIS_URL</code> est configuré.</li></ul>
         </section>
         <section id="openapi">
           <span className={styles.label}>06 · OUTILLAGE</span><h2>Explorez la spécification.</h2>

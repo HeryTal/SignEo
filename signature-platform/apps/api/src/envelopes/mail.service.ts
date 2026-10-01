@@ -37,4 +37,11 @@ export class MailService {
     await transport.sendMail({ from: process.env.SMTP_FROM, to, subject: `Dossier terminé — ${envelopeTitle}`, text: `Tous les destinataires ont traité « ${envelopeTitle} ». Vous pouvez télécharger les documents signés et le journal de preuve dans Signeo.` });
     return { delivered: true };
   }
+
+  async sendOtp(to: string, recipientName: string, envelopeTitle: string, code: string) {
+    if (!this.configured) return { delivered: false, reason: 'SMTP_NOT_CONFIGURED' as const };
+    const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT ?? 587), secure: process.env.SMTP_SECURE === 'true', auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } : undefined });
+    await transport.sendMail({ from: process.env.SMTP_FROM, to, subject: `Code de vérification — ${envelopeTitle}`, text: `Bonjour ${recipientName},\n\nVotre code de vérification Signeo est : ${code}\n\nIl expire dans 10 minutes. Ne le partagez avec personne.` });
+    return { delivered: true };
+  }
 }

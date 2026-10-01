@@ -32,7 +32,7 @@ export function DashboardSidebar({ userName, activeWorkspace, open, onClose, onL
 
   return (
     <aside className={open ? "dashboard-sidebar open" : "dashboard-sidebar"}>
-      <Link href="/" className="brand dashboard-brand" aria-label="Signeo, accueil">
+      <Link href="/dashboard" className="brand dashboard-brand" aria-label="Signeo, vue d’ensemble">
         <span className="brand-mark" aria-hidden="true">s.</span>
         signeo
       </Link>

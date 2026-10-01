@@ -4,7 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomInt, randomUUID } from 'node:crypto';
+import { compare, hash } from 'bcryptjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { DataSource, Repository } from 'typeorm';
@@ -26,6 +27,8 @@ import { Cron } from '@nestjs/schedule';
 import { MailService } from './mail.service.js';
 import { WorkspacesService } from '../workspaces/workspaces.service.js';
 import type { WorkspaceMember } from '../workspaces/workspace-member.entity.js';
+import { WorkspaceMember as WorkspaceMemberEntity } from '../workspaces/workspace-member.entity.js';
+import { WebhooksService } from '../webhooks/webhooks.service.js';
 
 export type IncomingRecipient = {
   name: string;
@@ -78,9 +81,11 @@ export class EnvelopesService {
     @InjectRepository(AuditEvent)
     private readonly events: Repository<AuditEvent>,
     @InjectRepository(User) private readonly users: Repository<User>,
+    @InjectRepository(WorkspaceMemberEntity) private readonly workspaceMembers: Repository<WorkspaceMemberEntity>,
     private readonly dataSource: DataSource,
     private readonly mail: MailService,
     private readonly workspaces: WorkspacesService,
+    private readonly webhooks: WebhooksService,
   ) {}
 
   async create(
@@ -94,6 +99,8 @@ export class EnvelopesService {
     allowDecline = false,
     collectionRequests: IncomingCollectionRequest[] = [],
     preparationSettings: Envelope['preparationSettings'] = {},
+    apiEnvironment: Envelope['apiEnvironment'] = 'PRODUCTION',
+    workspaceId?: string,
   ) {
     if (!preparationSettings || !['SIMULTANEOUS', 'SEQUENTIAL', 'CUSTOM'].includes(preparationSettings.signingMode ?? 'SEQUENTIAL'))
       throw new BadRequestException('Ordre des destinataires invalide.');
@@ -231,7 +238,9 @@ export class EnvelopesService {
     }
 
     const owner = await this.users.findOneByOrFail({ id: ownerId });
-    const membership = await this.workspaces.activeForUser(ownerId);
+    const membership = workspaceId
+      ? await this.workspaceMembers.findOneOrFail({ where: { workspace: { id: workspaceId }, user: { id: ownerId } }, relations: { workspace: true } })
+      : await this.workspaces.activeForUser(ownerId);
     this.workspaces.requireWrite(membership.role);
     for (const recipient of recipientsInput) {
       if (!['SIMPLE', 'ADVANCED', 'QUALIFIED'].includes(recipient.signatureLevel ?? 'SIMPLE'))
@@ -240,8 +249,8 @@ export class EnvelopesService {
         throw new BadRequestException('Méthode d’authentification invalide.');
       if ((recipient.signatureLevel ?? 'SIMPLE') !== 'SIMPLE')
         throw new BadRequestException('Les niveaux avancé et qualifié nécessitent un prestataire de confiance. Choisissez SIMPLE jusqu’à sa configuration.');
-      if (recipient.authenticationMethod && recipient.authenticationMethod !== 'NONE')
-        throw new BadRequestException('La vérification OTP nécessite un fournisseur e-mail ou SMS configuré.');
+      if (recipient.authenticationMethod === 'SMS_OTP')
+        throw new BadRequestException('La vérification SMS nécessite un fournisseur SMS configuré. Utilisez EMAIL_OTP ou NONE.');
     }
     await mkdir(this.uploadDirectory, { recursive: true });
     const storedFiles: string[] = [];
@@ -271,6 +280,7 @@ export class EnvelopesService {
         title: title?.trim() || files[0].originalname.replace(/\.[^.]+$/, ''),
         message: message?.trim() ?? '',
         status: 'DRAFT',
+        apiEnvironment,
         expiresAt: expiration,
         allowDecline,
         preparationSettings: {
@@ -358,7 +368,9 @@ export class EnvelopesService {
           },
         }),
       );
-      return this.toDto(envelope);
+      const response = this.toDto(envelope);
+      void this.webhooks.dispatch(membership.workspace.id, 'envelope.created', { envelopeId: envelope.id, title: envelope.title, status: envelope.status, environment: envelope.apiEnvironment });
+      return response;
     } catch (error) {
       const { unlink } = await import('node:fs/promises');
       await Promise.all(
@@ -366,6 +378,12 @@ export class EnvelopesService {
       );
       throw error;
     }
+  }
+
+  async createFromApi(workspaceId: string, environment: Envelope['apiEnvironment'], title: string, message: string, recipients: IncomingRecipient[], files: UploadedFile[], fields: IncomingField[] = [], expiresAt?: string, allowDecline = false) {
+    const member = await this.workspaceMembers.findOne({ where: { workspace: { id: workspaceId }, role: 'ADMIN' }, relations: { user: true } });
+    if (!member) throw new BadRequestException('Cet espace doit avoir un administrateur pour créer une enveloppe par API.');
+    return this.create(member.user.id, title, message, recipients, files, fields, expiresAt, allowDecline, [], { signingMode: 'SEQUENTIAL' }, environment, workspaceId);
   }
 
   async list(ownerId: string) {
@@ -403,9 +421,9 @@ export class EnvelopesService {
       relations: { documents: true, recipients: true, events: true, workspace: true, owner: true },
     });
     this.assertReadable(envelope, ownerId, membership);
-    if (envelope.status === 'COMPLETED' && envelope.documents.some((document) => !document.signedStorageName)) {
-      try { await this.createCryptographicallySignedPdfs(envelope); }
-      catch (error) { console.error('PDF cryptographic sealing failed:', error instanceof Error ? error.message : 'Unknown error'); }
+    if (envelope.status === 'COMPLETED' && envelope.documents.some((document) => !document.finalStorageName || (process.env.SIGNING_P12_PATH && process.env.SIGNING_P12_PASSWORD && !document.signedStorageName))) {
+      try { await this.createCompletedPdfs(envelope); }
+      catch (error) { console.error('PDF final generation failed:', error instanceof Error ? error.message : 'Unknown error'); }
     }
     return {
       ...this.toDto(envelope),
@@ -444,8 +462,10 @@ export class EnvelopesService {
     };
   }
 
-  async send(ownerId: string, id: string, webOrigin: string) {
-    const membership = await this.workspaces.activeForUser(ownerId);
+  async send(ownerId: string, id: string, webOrigin: string, workspaceId?: string, environment?: Envelope['apiEnvironment']) {
+    const membership = workspaceId
+      ? await this.workspaceMembers.findOneOrFail({ where: { workspace: { id: workspaceId }, user: { id: ownerId } }, relations: { workspace: true } })
+      : await this.workspaces.activeForUser(ownerId);
     this.workspaces.requireWrite(membership.role);
     const result = await this.dataSource.transaction(async (manager) => {
       const envelope = await manager.getRepository(Envelope).findOne({
@@ -453,6 +473,7 @@ export class EnvelopesService {
         relations: { documents: true, recipients: true, owner: true, workspace: true },
       });
       this.assertReadable(envelope, ownerId, membership);
+      if (environment && envelope.apiEnvironment !== environment) throw new NotFoundException('Enveloppe introuvable dans cet environnement.');
       if (envelope.status !== 'DRAFT')
         throw new BadRequestException('Cette enveloppe a déjà été envoyée.');
       if (
@@ -492,7 +513,14 @@ export class EnvelopesService {
       action: delivery.delivered ? 'INVITATION_EMAIL_SENT' : 'INVITATION_EMAIL_PENDING',
       details: delivery.delivered ? {} : { reason: delivery.reason },
     }))));
+    void this.webhooks.dispatch(membership.workspace.id, 'envelope.sent', { envelopeId: id, title: result.envelope.title, status: 'SENT', environment: result.envelope.apiEnvironment });
     return { ...result, deliveries };
+  }
+
+  async sendFromApi(workspaceId: string, environment: Envelope['apiEnvironment'], id: string, webOrigin: string) {
+    const member = await this.workspaceMembers.findOne({ where: { workspace: { id: workspaceId }, role: 'ADMIN' }, relations: { user: true } });
+    if (!member) throw new NotFoundException('Administrateur de l’espace introuvable.');
+    return this.send(member.user.id, id, webOrigin, workspaceId, environment);
   }
 
   async getPublicInvitation(token: string) {
@@ -526,6 +554,7 @@ export class EnvelopesService {
         email: recipient.email,
         role: recipient.role,
         status: recipient.status,
+        authenticationMethod: recipient.authenticationMethod,
       },
       envelope: {
         id: recipient.envelope.id,
@@ -680,8 +709,9 @@ export class EnvelopesService {
       relations: { envelope: { owner: true, workspace: true } },
     });
     this.assertReadable(document?.envelope, ownerId, membership);
-    if (!document?.signedStorageName) throw new NotFoundException('Le PDF signé n’est pas encore disponible. Vérifiez le certificat côté serveur.');
-    return { document, path: join(this.uploadDirectory, document.signedStorageName) };
+    const storageName = document?.signedStorageName ?? document?.finalStorageName;
+    if (!document || !storageName) throw new NotFoundException('Le PDF final n’est pas encore disponible.');
+    return { document, path: join(this.uploadDirectory, storageName) };
   }
 
   async auditTrail(ownerId: string, envelopeId: string) {
@@ -691,10 +721,22 @@ export class EnvelopesService {
     return {
       envelope: { id: envelope.id, title: envelope.title, status: envelope.status, createdAt: envelope.createdAt, expiresAt: envelope.expiresAt },
       recipients: envelope.recipients.map((recipient) => ({ name: recipient.name, email: recipient.email, role: recipient.role, status: recipient.status, viewedAt: recipient.viewedAt, signedAt: recipient.signedAt })),
-      documents: this.orderedDocuments(envelope).map((document) => ({ name: document.originalName, checksum: document.checksum, signedPdfAvailable: Boolean(document.signedStorageName) })),
+      documents: this.orderedDocuments(envelope).map((document) => ({ name: document.originalName, checksum: document.checksum, finalPdfAvailable: Boolean(document.finalStorageName), signedPdfAvailable: Boolean(document.signedStorageName) })),
       events: envelope.events.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map((event) => ({ action: event.action, actorEmail: event.actorEmail, createdAt: event.createdAt, details: event.details })),
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  async requestEmailOtp(token: string) {
+    const recipient = await this.recipients.findOne({ where: { accessToken: token }, relations: { envelope: true } });
+    if (!recipient || recipient.authenticationMethod !== 'EMAIL_OTP' || ['SIGNED', 'APPROVED'].includes(recipient.status)) throw new NotFoundException('Vérification indisponible pour cette invitation.');
+    const code = randomInt(100000, 1_000_000).toString();
+    recipient.otpHash = await hash(code, 10); recipient.otpExpiresAt = new Date(Date.now() + 10 * 60_000); recipient.otpVerifiedAt = null; recipient.otpAttempts = 0;
+    await this.recipients.save(recipient);
+    const delivery = await this.mail.sendOtp(recipient.email, recipient.name, recipient.envelope.title, code);
+    if (!delivery.delivered) throw new BadRequestException('Le service e-mail n’est pas configuré pour envoyer le code.');
+    await this.events.save(this.events.create({ envelope: recipient.envelope, actor: null, actorEmail: recipient.email, action: 'EMAIL_OTP_SENT', details: { expiresAt: recipient.otpExpiresAt.toISOString() } }));
+    return { sent: true, expiresAt: recipient.otpExpiresAt };
   }
 
   async sign(
@@ -702,6 +744,7 @@ export class EnvelopesService {
     signatureName: string,
     consent: boolean,
     fieldValues: Record<string, string> = {},
+    otpCode?: string,
   ) {
     if (!signatureName?.trim() || !consent)
       throw new BadRequestException(
@@ -719,6 +762,13 @@ export class EnvelopesService {
         ['SIGNED', 'APPROVED'].includes(recipient.status)
       )
         throw new NotFoundException('Invitation introuvable ou déjà traitée.');
+      if (recipient.authenticationMethod === 'EMAIL_OTP' && !recipient.otpVerifiedAt) {
+        if (!recipient.otpHash || !recipient.otpExpiresAt || recipient.otpExpiresAt.getTime() < Date.now() || recipient.otpAttempts >= 5 || !otpCode || !(await compare(otpCode, recipient.otpHash))) {
+          recipient.otpAttempts += 1; await manager.save(recipient);
+          throw new BadRequestException('Saisissez un code e-mail valide, reçu il y a moins de 10 minutes.');
+        }
+        recipient.otpVerifiedAt = new Date(); recipient.otpHash = null; await manager.save(recipient);
+      }
       if (
         recipient.envelope.expiresAt &&
         recipient.envelope.expiresAt.getTime() < Date.now()
@@ -820,6 +870,8 @@ export class EnvelopesService {
         details: {
           recipientId: recipient.id,
           signatureName: signatureName.trim(),
+          authenticationMethod: recipient.authenticationMethod,
+          otpVerifiedAt: recipient.otpVerifiedAt?.toISOString(),
           fieldValues: completedFieldValues,
         },
       });
@@ -832,11 +884,12 @@ export class EnvelopesService {
     if (result.status === 'COMPLETED') {
       const completedEnvelope = await this.envelopes.findOne({
         where: { id: result.envelopeId },
-        relations: { documents: true, recipients: true, owner: true },
+        relations: { documents: true, recipients: true, owner: true, workspace: true },
       });
       if (completedEnvelope) {
-        try { await this.createCryptographicallySignedPdfs(completedEnvelope); }
-        catch (error) { console.error('PDF cryptographic sealing failed:', error instanceof Error ? error.message : 'Unknown error'); }
+        try { await this.createCompletedPdfs(completedEnvelope); }
+        catch (error) { console.error('PDF final generation failed:', error instanceof Error ? error.message : 'Unknown error'); }
+        if (completedEnvelope.workspace) void this.webhooks.dispatch(completedEnvelope.workspace.id, 'envelope.completed', { envelopeId: completedEnvelope.id, title: completedEnvelope.title, status: completedEnvelope.status, environment: completedEnvelope.apiEnvironment });
         try {
           const delivery = await this.mail.sendCompletionNotice(completedEnvelope.owner.email, completedEnvelope.title);
           await this.events.save(this.events.create({ envelope: completedEnvelope, actor: null, actorEmail: completedEnvelope.owner.email, action: delivery.delivered ? 'COMPLETION_EMAIL_SENT' : 'COMPLETION_EMAIL_PENDING', details: delivery.delivered ? {} : { reason: delivery.reason } }));
@@ -923,6 +976,7 @@ export class EnvelopesService {
       title: envelope.title,
       message: envelope.message,
       status: envelope.status,
+      apiEnvironment: envelope.apiEnvironment,
       createdAt: envelope.createdAt,
       expiresAt: envelope.expiresAt,
       preparationSettings: envelope.preparationSettings,
@@ -932,6 +986,7 @@ export class EnvelopesService {
         name: document.originalName,
         mimeType: document.mimeType,
         size: Number(document.size),
+        finalPdfAvailable: Boolean(document.finalStorageName),
         signedPdfAvailable: Boolean(document.signedStorageName),
       })),
       fields: envelope.fields ?? [],
@@ -955,6 +1010,43 @@ export class EnvelopesService {
         ),
       })),
     };
+  }
+
+  private async createCompletedPdfs(envelope: Envelope) {
+    await this.createFinalPdfs(envelope);
+    await this.createCryptographicallySignedPdfs(envelope);
+  }
+
+  private async createFinalPdfs(envelope: Envelope) {
+    const audit = await this.events.find({ where: { envelope: { id: envelope.id }, action: 'DOCUMENT_SIGNED' }, order: { createdAt: 'ASC' } });
+    for (const [documentIndex, document] of this.orderedDocuments(envelope).entries()) {
+      if (document.finalStorageName || (!document.mimeType.includes('pdf') && !document.originalName.toLowerCase().endsWith('.pdf'))) continue;
+      const pdf = await PDFDocument.load(await readFile(join(this.uploadDirectory, document.storageName)));
+      const defaultFont = await pdf.embedFont(StandardFonts.Helvetica);
+      for (const event of audit) {
+        const values = (event.details?.fieldValues ?? {}) as Record<string, string>;
+        for (const field of (envelope.fields ?? []).filter((item) => item.documentIndex === documentIndex)) {
+          const value = values[field.id];
+          if (!value || field.type === 'CHECKBOX' && value !== 'true') continue;
+          const page = pdf.getPage(field.pageNumber - 1);
+          if (!page) continue;
+          const x = (field.x / 100) * page.getWidth();
+          const y = page.getHeight() - (field.y / 100) * page.getHeight() - 14;
+          const label = field.type === 'CHECKBOX' ? '[x] ' + field.label : field.type === 'SIGN_DATE' && isCalendarDate(value) ? value.split('-').reverse().join('/') : value;
+          const family = field.fontFamily ?? 'SANS';
+          const chosenFont = family === 'SCRIPT' ? StandardFonts.TimesRomanItalic : family === 'SERIF' ? StandardFonts.TimesRoman : family === 'MONO' ? StandardFonts.Courier : StandardFonts.Helvetica;
+          const fieldFont = family === 'SANS' ? defaultFont : await pdf.embedFont(chosenFont);
+          const hex = field.fontColor ?? '#24352b';
+          const color = rgb(parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255);
+          page.drawText(label.slice(0, 200), { x, y, size: field.fontSize ?? 11, font: fieldFont, color, maxWidth: page.getWidth() * (field.width ?? 55) / 100 });
+          if (field.type === 'SIGNATURE' && field.signatureDisplay === 'DETAILED') page.drawText(`Signe le ${event.createdAt.toLocaleDateString('fr-FR')} - ${event.actorEmail}`, { x, y: y - 13, size: 7, font: defaultFont, color, maxWidth: page.getWidth() * (field.width ?? 35) / 100 });
+        }
+      }
+      const finalStorageName = `${randomUUID()}-final.pdf`;
+      await writeFile(join(this.uploadDirectory, finalStorageName), await pdf.save(), { flag: 'wx' });
+      document.finalStorageName = finalStorageName;
+      await this.documents.save(document);
+    }
   }
 
   private async createCryptographicallySignedPdfs(envelope: Envelope) {

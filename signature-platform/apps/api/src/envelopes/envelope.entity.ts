@@ -80,6 +80,8 @@ export class Envelope {
     value: string;
   }[];
   @Column({ length: 32, default: 'DRAFT' }) status!: EnvelopeStatus;
+  @Column({ name: 'api_environment', length: 16, default: 'PRODUCTION' })
+  apiEnvironment!: 'SANDBOX' | 'PRODUCTION';
   @Column({ name: 'expires_at', type: 'timestamptz', nullable: true })
   expiresAt!: Date | null;
   @Column({ name: 'allow_decline', type: 'boolean', default: false })

@@ -62,6 +62,7 @@ export class EnvelopesController {
       signatureName?: string;
       consent?: boolean;
       fieldValues?: Record<string, string>;
+      otpCode?: string;
     },
   ) {
     return this.envelopes.sign(
@@ -69,8 +70,12 @@ export class EnvelopesController {
       body.signatureName ?? '',
       body.consent === true,
       body.fieldValues ?? {},
+      body.otpCode,
     );
   }
+
+  @Post('envelopes/public/:token/email-otp')
+  requestEmailOtp(@Param('token') token: string) { return this.envelopes.requestEmailOtp(token); }
 
   @Get('envelopes')
   @UseGuards(JwtAuthGuard)

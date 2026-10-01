@@ -11,5 +11,8 @@ import { ApiRequestLog } from './api-request-log.entity.js';
 import { DeveloperController } from './developer.controller.js';
 import { PublicApiController } from './public-api.controller.js';
 import { OpenApiController } from './openapi.controller.js';
-@Module({ imports: [TypeOrmModule.forFeature([ApiKey, ApiRequestLog, Envelope]), WorkspacesModule, JwtModule.register({ secret: process.env.JWT_SECRET ?? 'local-development-secret-change-me' })], controllers: [DeveloperController, PublicApiController, OpenApiController], providers: [ApiKeyService, ApiKeyGuard, JwtAuthGuard] })
+import { RateLimitService } from './rate-limit.service.js';
+import { EnvelopesModule } from '../envelopes/envelopes.module.js';
+import { WebhooksModule } from '../webhooks/webhooks.module.js';
+@Module({ imports: [TypeOrmModule.forFeature([ApiKey, ApiRequestLog, Envelope]), WorkspacesModule, EnvelopesModule, WebhooksModule, JwtModule.register({ secret: process.env.JWT_SECRET ?? 'local-development-secret-change-me' })], controllers: [DeveloperController, PublicApiController, OpenApiController], providers: [ApiKeyService, ApiKeyGuard, RateLimitService, JwtAuthGuard] })
 export class DeveloperModule {}

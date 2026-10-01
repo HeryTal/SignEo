@@ -39,7 +39,7 @@ type PublicField = {
 };
 type PublicCollectionRequest = { id: string; label: string; required: boolean };
 type Invitation = {
-  recipient: { name: string; email: string; role: string; status: string };
+  recipient: { name: string; email: string; role: string; status: string; authenticationMethod: "NONE" | "EMAIL_OTP" | "SMS_OTP" };
   envelope: {
     title: string;
     message: string;
@@ -66,6 +66,8 @@ export default function SignerPage() {
   const [signatureName, setSignatureName] = useState("");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [consent, setConsent] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -112,7 +114,7 @@ export default function SignerPage() {
       const response = await fetch(`${API}/envelopes/public/${token}/sign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signatureName, consent, fieldValues }),
+        body: JSON.stringify({ signatureName, consent, fieldValues, otpCode }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok)
@@ -125,6 +127,12 @@ export default function SignerPage() {
     } finally {
       setBusy(false);
     }
+  }
+  async function requestOtp() {
+    setBusy(true); setError("");
+    try { const response = await fetch(`${API}/envelopes/public/${token}/email-otp`, { method: "POST" }); const payload = await response.json().catch(() => null); if (!response.ok) throw new Error(payload?.message ?? "Impossible d’envoyer le code."); setOtpSent(true); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Impossible d’envoyer le code."); }
+    finally { setBusy(false); }
   }
   async function decline() {
     if (
@@ -466,6 +474,7 @@ export default function SignerPage() {
                   {signatureName || "Votre nom"}
                 </div>
               )}
+              {invitation.recipient.authenticationMethod === "EMAIL_OTP" && <div className="auth-notice"><b>Vérification par e-mail</b><p>Recevez un code à six chiffres sur {invitation.recipient.email}, puis saisissez-le avant de signer.</p>{otpSent ? <label className="form-field">Code reçu<input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otpCode} onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, ""))} placeholder="123456" /></label> : <button type="button" className="secondary-action" disabled={busy} onClick={requestOtp}>Envoyer le code</button>}</div>}
               <label className="consent-check">
                 <input
                   type="checkbox"

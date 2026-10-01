@@ -10,10 +10,13 @@ import { EnvelopesService } from './envelopes.service.js';
 import { Recipient } from './recipient.entity.js';
 import { MailService } from './mail.service.js';
 import { WorkspacesModule } from '../workspaces/workspaces.module.js';
+import { WorkspaceMember } from '../workspaces/workspace-member.entity.js';
+import { WebhooksModule } from '../webhooks/webhooks.module.js';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Envelope, EnvelopeDocument, Recipient, AuditEvent, User]), AuthModule, WorkspacesModule],
+  imports: [TypeOrmModule.forFeature([Envelope, EnvelopeDocument, Recipient, AuditEvent, User, WorkspaceMember]), AuthModule, WorkspacesModule, WebhooksModule],
   controllers: [EnvelopesController],
   providers: [EnvelopesService, MailService],
+  exports: [EnvelopesService],
 })
 export class EnvelopesModule {}

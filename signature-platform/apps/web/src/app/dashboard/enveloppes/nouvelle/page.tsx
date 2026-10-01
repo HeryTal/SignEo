@@ -1169,7 +1169,7 @@ export default function NewEnvelopePage() {
                   <label className="form-field">Vérification du signataire
                     <select value={recipient.authenticationMethod} onChange={(event) => updateRecipient(index, "authenticationMethod", event.target.value)}>
                       <option value="NONE">Aucune vérification supplémentaire</option>
-                      <option value="EMAIL_OTP" disabled>Code e-mail (service requis)</option>
+                      <option value="EMAIL_OTP">Code e-mail de vérification</option>
                       <option value="SMS_OTP" disabled>Code SMS (service requis)</option>
                     </select>
                   </label>

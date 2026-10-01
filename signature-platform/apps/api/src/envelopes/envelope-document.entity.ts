@@ -12,6 +12,8 @@ export class EnvelopeDocument {
   @Column({ length: 64 }) checksum!: string;
   @Column({ name: 'signed_storage_name', type: 'varchar', length: 100, nullable: true })
   signedStorageName!: string | null;
+  @Column({ name: 'final_storage_name', type: 'varchar', length: 100, nullable: true })
+  finalStorageName!: string | null;
   @ManyToOne(() => Envelope, (envelope) => envelope.documents, { onDelete: 'CASCADE' }) envelope!: Relation<Envelope>;
   @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
 }

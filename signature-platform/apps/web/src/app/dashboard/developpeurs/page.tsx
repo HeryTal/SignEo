@@ -38,6 +38,7 @@ export default function DevelopersPage() {
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
   const [environment, setEnvironment] = useState("SANDBOX");
+  const [writeAccess, setWriteAccess] = useState(false);
   const [filter, setFilter] = useState("ALL");
   const [secret, setSecret] = useState("");
   const [error, setError] = useState("");
@@ -58,7 +59,7 @@ export default function DevelopersPage() {
     event.preventDefault(); if (busy || secret) return;
     setBusy(true); setError(""); setTest("");
     try {
-      const { secret: newSecret, ...key } = await request("/developer/api-keys", { method: "POST", body: JSON.stringify({ name: name.trim(), environment, scopes: ["envelopes:read"] }) });
+      const { secret: newSecret, ...key } = await request("/developer/api-keys", { method: "POST", body: JSON.stringify({ name: name.trim(), environment, scopes: writeAccess ? ["envelopes:read", "envelopes:write"] : ["envelopes:read"] }) });
       setSecret(newSecret); setKeys((current) => [key, ...current]); setName(""); setFilter("ALL");
     } catch (cause) { setError(message(cause)); }
     finally { setBusy(false); }
@@ -105,8 +106,8 @@ export default function DevelopersPage() {
           {loading ? <p role="status">Chargement des droits…</p> : !admin ? <p className={styles.note}>Seul un administrateur de cet espace peut créer ou révoquer une clé.</p> : <form onSubmit={create}>
             <label className={styles.field}>Nom de l’intégration<input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex. CRM de mon agence"/></label>
             <fieldset className={styles.environments}><legend>Environnement</legend>{["SANDBOX", "PRODUCTION"].map((value) => <label key={value}><input type="radio" name="environment" value={value} checked={environment === value} onChange={() => setEnvironment(value)}/><span><b>{value === "SANDBOX" ? "Sandbox" : "Production"}</b><small>{value === "SANDBOX" ? "Identifier vos essais" : "Identifier votre intégration"}</small></span></label>)}</fieldset>
-            <p className={styles.note}>Les deux types de clés accèdent actuellement aux mêmes données de cet espace.</p>
-            <fieldset className={styles.permissions}><legend>Permissions</legend><label><input type="checkbox" checked disabled/><span><b>Consulter les enveloppes</b><small>envelopes:read · titres, statuts et nombre de destinataires.</small></span></label><p>L’écriture via l’API publique n’est pas encore disponible.</p></fieldset>
+            <p className={styles.note}>Sandbox et Production séparent les enveloppes créées par API.</p>
+            <fieldset className={styles.permissions}><legend>Permissions</legend><label><input type="checkbox" checked disabled/><span><b>Consulter les enveloppes</b><small>envelopes:read · titres, statuts et nombre de destinataires.</small></span></label><label><input type="checkbox" checked={writeAccess} onChange={(event) => setWriteAccess(event.target.checked)}/><span><b>Créer et envoyer</b><small>envelopes:write · routes d’écriture API.</small></span></label></fieldset>
             <button className={styles.primary} disabled={busy || !name.trim() || !!secret}>{busy ? "Création…" : "Générer une clé →"}</button>{secret && <small>Enregistrez puis fermez la clé ci-dessus avant d’en créer une autre.</small>}
           </form>}
         </section><aside className={styles.card}><span className={styles.eyebrow}>02 · CONNECTER</span><h3>Votre premier appel</h3><ol className={styles.steps}><li>Créez et copiez une clé.</li><li>Remplacez VOTRE_CLE_API dans la commande.</li><li>Exécutez-la dans PowerShell.</li></ol><Code title="PowerShell · lecture seule" value={command}/><p>Une réponse avec <code>data</code> confirme l’accès. Une liste vide signifie simplement que l’espace ne contient aucune enveloppe.</p><button className={styles.secondary} onClick={() => setTab("docs")}>Comprendre la réponse →</button></aside></div>
@@ -122,7 +123,7 @@ export default function DevelopersPage() {
 if (!response.ok) throw new Error("HTTP " + response.status);
 const { data } = await response.json();
 console.log(data);`}/><h4>3. Lire le résultat</h4><Code title="Exemple du tableau data" value={'[\n  {\n    "id": "identifiant-de-l-enveloppe",\n    "title": "Contrat",\n    "status": "SENT",\n    "createdAt": "2026-09-30T12:00:00.000Z",\n    "recipientCount": 2,\n    "documentCount": 1\n  }\n]'}/><p><code>data</code> contient les enveloppes. <code>limit: 60</code> décrit la limite de débit, pas un nombre de résultats. Le champ <code>remaining</code> est actuellement un texte indicatif, pas un compteur.</p><h4>4. Résoudre une erreur</h4><div className={styles.table}><table><thead><tr><th>Code HTTP</th><th>Signification</th><th>Action</th></tr></thead><tbody>{[["200", "Appel réussi", "Lisez le tableau data, éventuellement vide."], ["401", "Clé absente, invalide ou révoquée", "Vérifiez la clé et le préfixe Bearer."], ["403", "Permission manquante", "Utilisez une clé avec envelopes:read."], ["429", "Trop de requêtes", "Attendez 60 secondes avant de réessayer."]].map((row) => <tr key={row[0]}>{row.map((cell) => <td key={cell}>{cell}</td>)}</tr>)}</tbody></table></div><h4>Spécification OpenAPI</h4><p>Importez cette URL dans Postman ou un outil compatible pour explorer l’endpoint disponible.</p><a className={styles.secondary} href={API + "/v1/openapi.json"} target="_blank" rel="noreferrer">Ouvrir le document OpenAPI ↗</a><p className={styles.note}>Les routes d’écriture, les webhooks et l’isolation des données Sandbox ne sont pas encore disponibles.</p></section>}
-      {tab === "limits" && <section className={styles.card}><span className={styles.eyebrow}>DÉBIT PAR CLÉ</span><h3 className={styles.number}>60 <small>requêtes / minute</small></h3><p>Les appels autorisés sont comptés sur les 60 dernières secondes. Lorsque cette limite est atteinte, l’API répond avec le code HTTP 429.</p><p>Les compteurs sont actuellement conservés en mémoire par serveur et remis à zéro au redémarrage. Redis n’est pas encore raccordé au limiteur.</p></section>}
+      {tab === "limits" && <section className={styles.card}><span className={styles.eyebrow}>DÉBIT PAR CLÉ</span><h3 className={styles.number}>60 <small>requêtes / minute</small></h3><p>Les appels autorisés sont comptés sur les 60 dernières secondes. Lorsque cette limite est atteinte, l’API répond avec le code HTTP 429 et les en-têtes de limite.</p><p>Avec <code>REDIS_URL</code>, les compteurs sont partagés entre les serveurs et résistent aux redémarrages.</p></section>}
     </div>
   </DashboardLayout>;
 }
