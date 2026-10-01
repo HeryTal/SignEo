@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { DashboardLayout } from "@/app/ui/dashboard/dashboard-layout";
+import { SigneoMark } from "@/app/ui/signeo-logo";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 type Branding = { displayName: string; accentColor: string; logoUrl: string; textFont: "SANS" | "SERIF" | "MONO"; signatureFont: "SCRIPT" | "SERIF" | "SANS"; textColor: string; signatureColor: string; textSize: number; signatureSize: number };
@@ -55,7 +56,7 @@ export default function SettingsPage() {
       <section className="settings-card brand-preview">
         <p className="eyebrow">APERÇU DESTINATAIRE</p>
         <div className="brand-preview-header" style={{ borderColor: branding.accentColor }}>
-          {branding.logoUrl ? <img src={branding.logoUrl} alt="Logo" /> : <span className="brand-mark" style={{ background: branding.accentColor }}>s.</span>}
+          {branding.logoUrl ? <img src={branding.logoUrl} alt="Logo" /> : <SigneoMark />}
           <b>{branding.displayName || "Votre organisation"}</b>
         </div>
         <h2>Une invitation vous attend</h2><p style={{ fontFamily: branding.textFont === "SERIF" ? "Georgia, serif" : branding.textFont === "MONO" ? "monospace" : "Arial, sans-serif", fontSize: branding.textSize, color: branding.textColor }}>Consultez le document et suivez les étapes de signature dans cet espace sécurisé.</p>

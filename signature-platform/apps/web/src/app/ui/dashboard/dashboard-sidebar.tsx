@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { SigneoLogo } from "../signeo-logo";
 
 type SidebarProps = {
   userName?: string;
@@ -32,10 +33,7 @@ export function DashboardSidebar({ userName, activeWorkspace, open, onClose, onL
 
   return (
     <aside className={open ? "dashboard-sidebar open" : "dashboard-sidebar"}>
-      <Link href="/dashboard" className="brand dashboard-brand" aria-label="Signeo, vue d’ensemble">
-        <span className="brand-mark" aria-hidden="true">s.</span>
-        signeo
-      </Link>
+      <Link href="/dashboard" className="brand dashboard-brand" aria-label="Signeo.it, vue d’ensemble"><SigneoLogo /></Link>
       <div className="sidebar-workspace">
         <span className="workspace-avatar">{workspaceName[0].toUpperCase()}</span>
         <span><b>{workspaceName}</b><small>{activeWorkspace?.role ?? "Espace personnel"}</small></span>

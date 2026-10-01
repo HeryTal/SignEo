@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { SigneoLogo } from "./signeo-logo";
 
 type AuthPageProps = { mode: "login" | "signup" };
 
@@ -97,9 +98,7 @@ export default function AuthPage({ mode }: AuthPageProps) {
   return (
     <main className="auth-shell">
       <aside className="auth-aside">
-        <Link href="/" className="brand auth-brand" aria-label="Signeo, accueil">
-          <span className="brand-mark" aria-hidden="true">s.</span>signeo
-        </Link>
+        <Link href="/" className="brand auth-brand" aria-label="Signeo.it, accueil"><SigneoLogo /></Link>
         <div className="auth-story">
           <span className="auth-star" aria-hidden="true">✳</span>
           <p className="eyebrow">LES BELLES HISTOIRES COMMENCENT ICI</p>
@@ -111,7 +110,7 @@ export default function AuthPage({ mode }: AuthPageProps) {
 
       <section className="auth-content" aria-labelledby="auth-title">
         <div className="auth-mobile-brand">
-          <Link href="/" className="brand" aria-label="Signeo, accueil"><span className="brand-mark" aria-hidden="true">s.</span>signeo</Link>
+          <Link href="/" className="brand" aria-label="Signeo.it, accueil"><SigneoLogo /></Link>
         </div>
         <div className="auth-card">
           <p className="eyebrow">VOTRE ESPACE SIGNEO</p>

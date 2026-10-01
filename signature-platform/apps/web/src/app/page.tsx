@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useState } from "react";
 import apiStyles from "./landing-api.module.css";
+import { SigneoLogo } from "./ui/signeo-logo";
 
 const Arrow = () => <span aria-hidden="true">↗</span>;
 const steps = [
@@ -22,7 +23,7 @@ export default function Home() {
     <>
       <a className="skip" href="#contenu">Aller au contenu</a>
       <header className="header wrap">
-        <a href="#" className="brand" aria-label="Signeo, accueil"><span className="brand-mark" aria-hidden="true">s.</span>signeo</a>
+        <a href="#" className="brand" aria-label="Signeo.it, accueil"><SigneoLogo /></a>
         <button className="menu-toggle" aria-expanded={menu} aria-controls="navigation" onClick={() => setMenu(!menu)} onKeyDown={e => { if (e.key === "Escape") setMenu(false); }}>{menu ? "Fermer −" : "Menu +"}</button>
         <nav id="navigation" className={menu ? "nav open" : "nav"} aria-label="Navigation principale" onClick={() => setMenu(false)}>
           <a className="mobile-auth-link" href="/connexion">Se connecter</a><a className="mobile-auth-link" href="/inscription">Créer un espace</a>
@@ -71,8 +72,8 @@ export default function Home() {
             <div className="steps" aria-label="Étapes de la démonstration">{steps.map((item, index) => <button key={item.label} className={step === index ? "step active" : "step"} aria-pressed={step === index} onClick={() => setStep(index)}><span>0{index + 1}</span><b>{item.label}</b><span aria-hidden="true">↗</span></button>)}</div>
             <div className="step-explanation"><h3>{steps[step].title}</h3><p>{steps[step].text}</p></div>
           </div>
-          <div className="demo-window"><div className="window-bar"><span><i /><i /><i /></span><span>signeo / votre espace</span><span aria-hidden="true">↗</span></div><div className="document-area">
-            <div className="document-top"><span className="mini-brand">signeo.</span><span className="pill">DÉMONSTRATION</span></div>
+          <div className="demo-window"><div className="window-bar"><span><i /><i /><i /></span><span>Signeo.it / votre espace</span><span aria-hidden="true">↗</span></div><div className="document-area">
+            <div className="document-top"><span className="mini-brand">Signeo<span>.it</span></span><span className="pill">DÉMONSTRATION</span></div>
             <p className="document-overline">LES BELLES COLLABORATIONS COMMENCENT ICI</p><h3>Un projet qui<br />nous ressemble.</h3><div className="document-lines"><i /><i /><i /></div>
             <div className="document-details"><span>DOCUMENT<b>Accord de collaboration</b></span><span>RÉFÉRENCE<b>DEMO — 001</b></span></div>
             <div className="sign-box"><span>VOTRE SIGNATURE</span><strong className={signed ? "signed-name" : "placeholder-signature"}>{signed ? name.trim() : "À vous d’écrire la suite…"}</strong>{signed && <span className="signed-check">✓ Démonstration terminée</span>}</div>
@@ -131,7 +132,7 @@ export default function Home() {
           ["Puis-je connecter mon logiciel à Signeo ?", "Oui. L’API permet de consulter, créer et envoyer des enveloppes avec une clé API. L’espace Développeurs permet de créer les clés, choisir leurs permissions et configurer les webhooks."],
         ].map(([q, a]) => <details key={q}><summary>{q}<span aria-hidden="true">+</span></summary><p>{a}</p></details>)}</div></section>
       </main>
-      <footer className="footer wrap"><div className="footer-top"><a className="brand" href="#"><span className="brand-mark" aria-hidden="true">s.</span>signeo</a><p>Un petit geste.<br />De nouveaux possibles.</p><a href="#fonctionnement">Découvrir l’expérience <Arrow /></a></div><div className="footer-bottom"><span>© {new Date().getFullYear()} Signeo · Plateforme en développement</span><a href="#questions">Une question ?</a><span>Imaginé pour vous faire avancer.</span></div></footer>
+      <footer className="footer wrap"><div className="footer-top"><a className="brand" href="#"><SigneoLogo /></a><p>Un petit geste.<br />De nouveaux possibles.</p><a href="#fonctionnement">Découvrir l’expérience <Arrow /></a></div><div className="footer-bottom"><span>© {new Date().getFullYear()} Signeo.it · Plateforme en développement</span><a href="#questions">Une question ?</a><span>Imaginé pour vous faire avancer.</span></div></footer>
     </>
   );
 }

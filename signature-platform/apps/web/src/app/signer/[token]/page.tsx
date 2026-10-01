@@ -4,6 +4,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { FormEvent, useEffect, useState, type CSSProperties } from "react";
 import { useParams } from "next/navigation";
+import { SigneoLogo } from "../../ui/signeo-logo";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const PdfPages = dynamic(() => import("../../ui/pdf-pages"), {
@@ -192,7 +193,7 @@ export default function SignerPage() {
     <main className="signer-shell" style={{ ["--brand-accent" as string]: invitation?.envelope.branding?.accentColor || "#496b50" } as CSSProperties}>
       <header className="signer-header" style={{ borderBottomColor: invitation?.envelope.branding?.accentColor || undefined }}>
         <Link href="/" className="brand">
-          {invitation?.envelope.branding?.logoUrl ? <img className="signer-logo" src={invitation.envelope.branding.logoUrl} alt="" /> : <span className="brand-mark">s.</span>}{invitation?.envelope.branding?.displayName || "Signeo"}
+          {invitation?.envelope.branding?.logoUrl ? <><img className="signer-logo" src={invitation.envelope.branding.logoUrl} alt="" />{invitation.envelope.branding.displayName || "Signeo.it"}</> : <SigneoLogo />}
         </Link>
         <span>
           {isApprover ? "Approbation sécurisée" : "Signature sécurisée"}

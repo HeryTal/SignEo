@@ -14,6 +14,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { clearEnvelopeDraft, loadEnvelopeDraft, saveEnvelopeDraft } from "@/app/ui/envelope-draft-store";
+import { SigneoMark } from "@/app/ui/signeo-logo";
 
 const PdfPages = dynamic(() => import("@/app/ui/pdf-pages"), {
   ssr: false,
@@ -582,9 +583,7 @@ export default function NewEnvelopePage() {
     <main className="envelope-shell">
       <header className="envelope-header">
         <Link href="/dashboard" className="envelope-brand">
-          <span className="brand-mark" aria-hidden="true">
-            s.
-          </span>
+          <SigneoMark />
           <span>{title || "Nouvelle enveloppe"}</span>
         </Link>
         <div className="envelope-steps">

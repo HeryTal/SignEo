@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { CodeExample } from "./code-example";
 import styles from "./developers.module.css";
+import { SigneoLogo } from "../ui/signeo-logo";
 
 export const metadata: Metadata = {
   title: "Documentation API | Signeo",
@@ -22,7 +23,7 @@ export default function DevelopersDocumentation() {
   return <div className={styles.page}>
     <a className="skip" href="#documentation">Aller à la documentation</a>
     <header className={styles.header}>
-      <Link className="brand" href="/" aria-label="Signeo, accueil"><span className="brand-mark" aria-hidden="true">s.</span>signeo</Link>
+      <Link className="brand" href="/" aria-label="Signeo.it, accueil"><SigneoLogo /></Link>
       <span className={styles.label}>DEVELOPERS · V1</span>
       <Link className={styles.manage} href="/dashboard/developpeurs">Gérer mes clés API ↗</Link>
     </header>
