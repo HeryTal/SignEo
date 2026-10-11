@@ -56,7 +56,7 @@ export function DashboardAuthGuard({ children }: { children: ReactNode }) {
   }, [checkSession]);
 
   if (!user) {
-    return <main className="dashboard-auth-check" aria-live="polite">Vérification de votre session…</main>;
+    return <main className="dashboard-auth-check" aria-live="polite" aria-label="Vérification de votre session"><span className="dashboard-auth-spinner" aria-hidden="true" /></main>;
   }
 
   return <DashboardUserContext.Provider value={user}>{children}</DashboardUserContext.Provider>;
