@@ -6,7 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { compare, hash } from 'bcryptjs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { DataSource, EntityManager, In, LessThan, Repository } from 'typeorm';
 import { User } from '../users/user.entity.js';
@@ -640,6 +640,59 @@ export class EnvelopesService {
         details: event.details,
       })),
     };
+  }
+
+  async removeDocument(ownerId: string, envelopeId: string, documentId: string) {
+    const membership = await this.workspaces.activeForUser(ownerId);
+    this.workspaces.requirePermission(membership.role, 'ENVELOPE_MANAGE');
+    const removed = await this.dataSource.transaction(async (manager) => {
+      await this.lockEnvelope(manager, envelopeId);
+      const envelope = await manager.getRepository(Envelope).findOne({
+        where: { id: envelopeId },
+        relations: { documents: true, owner: true, workspace: true },
+      });
+      this.assertReadable(envelope, ownerId, membership);
+      if (envelope.status !== 'DRAFT') {
+        throw new BadRequestException('Seuls les documents d’une enveloppe brouillon peuvent être supprimés.');
+      }
+      const orderedDocuments = this.orderedDocuments(envelope);
+      const documentIndex = orderedDocuments.findIndex((document) => document.id === documentId);
+      if (documentIndex < 0) throw new NotFoundException('Document introuvable.');
+      if (orderedDocuments.length < 2) {
+        throw new BadRequestException('Une enveloppe doit conserver au moins un document.');
+      }
+      const document = orderedDocuments[documentIndex];
+      const documentOrder = envelope.preparationSettings?.documentOrder
+        ?.filter((storageName) => storageName !== document.storageName);
+      const documentVisibility = envelope.preparationSettings?.documentVisibility
+        ?.filter((_, index) => index !== documentIndex);
+      envelope.preparationSettings = {
+        ...envelope.preparationSettings,
+        ...(documentOrder ? { documentOrder } : {}),
+        ...(documentVisibility ? { documentVisibility } : {}),
+      };
+      envelope.fields = (envelope.fields ?? [])
+        .filter((field) => field.documentIndex !== documentIndex)
+        .map((field) => field.documentIndex > documentIndex ? { ...field, documentIndex: field.documentIndex - 1 } : field);
+      envelope.legacyTextFields = (envelope.legacyTextFields ?? [])
+        .filter((field) => field.documentIndex !== documentIndex)
+        .map((field) => field.documentIndex > documentIndex ? { ...field, documentIndex: field.documentIndex - 1 } : field);
+      await manager.getRepository(Envelope).save(envelope);
+      await manager.getRepository(EnvelopeDocument).delete(document.id);
+      const owner = await manager.getRepository(User).findOneByOrFail({ id: ownerId });
+      await manager.getRepository(AuditEvent).save({
+        envelope,
+        actor: owner,
+        actorEmail: owner.email,
+        action: 'DOCUMENT_REMOVED',
+        details: { documentId: document.id, documentName: document.originalName },
+      });
+      return document;
+    });
+    await Promise.all([removed.storageName, removed.finalStorageName, removed.signedStorageName]
+      .filter((storageName): storageName is string => Boolean(storageName))
+      .map((storageName) => unlink(join(this.uploadDirectory, storageName)).catch(() => undefined)));
+    return { id: removed.id };
   }
 
   async collectedDocument(

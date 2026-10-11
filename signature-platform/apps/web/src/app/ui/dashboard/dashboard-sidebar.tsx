@@ -12,6 +12,7 @@ type SidebarProps = {
   open: boolean;
   onClose: () => void;
   onLogout: () => void;
+  onOpenSubscription: () => void;
 };
 
 const workspaceLinks = [
@@ -28,7 +29,7 @@ const toolLinks = [
   { icon: "⌘", label: "Développeurs", href: "/dashboard/developpeurs" },
 ];
 
-export function DashboardSidebar({ userName, activeWorkspace, open, onClose, onLogout }: SidebarProps) {
+export function DashboardSidebar({ userName, activeWorkspace, open, onClose, onLogout, onOpenSubscription }: SidebarProps) {
   const pathname = usePathname();
   const isActive = (href: string) => pathname === href || (href !== "/dashboard" && pathname.startsWith(`${href}/`));
   const workspaceName = activeWorkspace?.name ?? userName ?? "Mon espace";
@@ -48,6 +49,7 @@ export function DashboardSidebar({ userName, activeWorkspace, open, onClose, onL
         {toolLinks.map((link) => <Link href={link.href} key={link.href} aria-current={isActive(link.href) ? "page" : undefined} onClick={onClose}><span aria-hidden="true">{link.icon}</span>{link.label}</Link>)}
       </nav>
       <div className="sidebar-bottom">
+        <button type="button" onClick={onOpenSubscription}><span aria-hidden="true">✦</span>Abonnement</button>
         <Link href="/dashboard/aide" aria-current={isActive("/dashboard/aide") ? "page" : undefined} onClick={onClose}><span aria-hidden="true">?</span>Aide</Link>
         <Link href="/dashboard/parametres" aria-current={isActive("/dashboard/parametres") ? "page" : undefined} onClick={onClose}><span aria-hidden="true">⚙</span>Paramètres</Link>
         <button type="button" onClick={() => setLogoutConfirmationOpen(true)}><span aria-hidden="true">↪</span>Se déconnecter</button>

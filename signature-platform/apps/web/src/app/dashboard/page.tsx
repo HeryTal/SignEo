@@ -16,9 +16,9 @@ export default function DashboardPage() {
   useEffect(() => { const token = localStorage.getItem("signeo_access_token"); fetch(`${API}/envelopes`, { headers: { Authorization: `Bearer ${token ?? ""}` } }).then((response) => response.ok ? response.json() : []).then(setEnvelopes).catch(() => setEnvelopes([])); }, []);
   const currentMonth = new Date().getMonth();
   const completedThisMonth = envelopes.filter((item) => item.status === "COMPLETED" && new Date(item.createdAt).getMonth() === currentMonth).length;
-  return <DashboardLayout title="Vue d’ensemble" description="Tout ce qu’il vous faut pour faire avancer vos accords.">
-    <div className="dashboard-title-actions"><Link className="button dashboard-create" href="/dashboard/enveloppes/nouvelle">+ Créer une enveloppe</Link></div>
+  return <DashboardLayout title="Vue d’ensemble" description="Tout ce qu’il vous faut pour faire avancer vos accords." actions={<Link className="button dashboard-create" href="/dashboard/enveloppes/nouvelle">+ Créer une enveloppe</Link>}>
     <div className="dashboard-stats"><StatCard icon="✎" color="stat-icon-green" label="À signer" value={envelopes.filter((item) => item.status === "SENT" || item.status === "PARTIALLY_SIGNED").length} description="Enveloppes actives" /><StatCard icon="◌" color="stat-icon-blue" label="En attente" value={envelopes.filter((item) => item.status === "SENT").length} description="Sans signature reçue" /><StatCard icon="✓" color="stat-icon-yellow" label="Terminées" value={completedThisMonth} description="Ce mois-ci" /></div>
-    <div className="dashboard-panels"><WelcomePanel /><ActivityPanel /></div><RecentDocuments />
+    <div className="dashboard-overview-grid"><RecentDocuments /><ActivityPanel /></div>
+    <WelcomePanel />
   </DashboardLayout>;
 }

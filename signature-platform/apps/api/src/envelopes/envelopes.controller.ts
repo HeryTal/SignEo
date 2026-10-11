@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -164,6 +165,16 @@ export class EnvelopesController {
     response.setHeader('Content-Type', 'application/pdf');
     response.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(document.originalName.replace(/\.pdf$/i, '') + '-signe.pdf')}"`);
     return new StreamableFile(createReadStream(path));
+  }
+
+  @Delete('envelopes/:id/documents/:documentId')
+  @UseGuards(JwtAuthGuard)
+  removeDocument(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+  ) {
+    return this.envelopes.removeDocument(request.user.sub, id, documentId);
   }
 
   @Get('envelopes/:id/audit-trail')
