@@ -8,8 +8,8 @@ type CheckoutPlan = "BUSINESS" | "ENTERPRISE";
 type Plan = { name: string; audience: string; price: string; detail: string; description: string; quota: string; features: string[]; checkoutPlan?: CheckoutPlan; featured?: boolean };
 const plans: Plan[] = [
   { name: "Free", audience: "POUR COMMENCER", price: "0 €", detail: "par mois", description: "Signez vos documents en ligne, gratuitement.", quota: "5 enveloppes/mois", features: ["Signature de vos propres documents", "Boîte de réception", "Relances automatiques"] },
-  { name: "Business", audience: "POUR LES INDÉPENDANTS", price: "—", detail: "sur devis", description: "Les essentiels pour faire signer vos documents au quotidien.", quota: "50 enveloppes/mois", features: ["Champs de signature essentiels", "Suivi des signatures", "Espace d’équipe"], checkoutPlan: "BUSINESS" },
-  { name: "Enterprise", audience: "POUR LES ÉQUIPES", price: "—", detail: "sur devis", description: "Automatisez et personnalisez vos flux de signature.", quota: "250 enveloppes/mois", features: ["Workflows avancés", "Gestion des équipes", "Accompagnement dédié"], checkoutPlan: "ENTERPRISE", featured: true },
+  { name: "Business", audience: "POUR LES INDÉPENDANTS", price: "10 €", detail: "par mois", description: "Les essentiels pour faire signer vos documents au quotidien.", quota: "50 enveloppes/mois", features: ["Champs de signature essentiels", "Suivi des signatures", "Espace d’équipe"], checkoutPlan: "BUSINESS" },
+  { name: "Enterprise", audience: "POUR LES ÉQUIPES", price: "20 €", detail: "par mois", description: "Automatisez et personnalisez vos flux de signature.", quota: "250 enveloppes/mois", features: ["Workflows avancés", "Gestion des équipes", "Accompagnement dédié"], checkoutPlan: "ENTERPRISE", featured: true },
 ];
 
 export function SubscriptionModal({ onClose }: { onClose: () => void }) {
