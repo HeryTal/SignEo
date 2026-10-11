@@ -1,11 +1,18 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import apiStyles from "./landing-api.module.css";
 import { SigneoLogo } from "./ui/signeo-logo";
 
 const Arrow = () => <span aria-hidden="true">↗</span>;
+const navItems = [
+  { label: "La plateforme", id: "plateforme" },
+  { label: "Comment ça marche", id: "fonctionnement" },
+  { label: "Pour qui ?", id: "usages" },
+  { label: "API", id: "api" },
+  { label: "Vos questions", id: "questions" },
+];
 const steps = [
   { title: "Un document. Et c’est parti.", text: "Contrat, devis ou proposition : tout commence par un document. Découvrez le parcours avec notre exemple.", label: "Préparez", detail: "Votre document est prêt à être partagé." },
   { title: "Les bonnes personnes, au bon endroit.", text: "Un parcours clair pour retrouver les personnes concernées et savoir quelle est la prochaine étape.", label: "Invitez", detail: "Camille Martin · Signataire de démonstration" },
@@ -18,6 +25,36 @@ export default function Home() {
   const [name, setName] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [signed, setSigned] = useState(false);
+  const [activeSection, setActiveSection] = useState("plateforme");
+
+  useEffect(() => {
+    const sections = navItems
+      .map((item) => document.getElementById(item.id))
+      .filter((section): section is HTMLElement => section !== null);
+
+    if (!sections.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntry = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+
+        if (visibleEntry) {
+          setActiveSection(visibleEntry.target.id);
+        }
+      },
+      {
+        root: null,
+        rootMargin: "-20% 0px -55% 0px",
+        threshold: [0.2, 0.4, 0.6, 0.8],
+      },
+    );
+
+    sections.forEach((section) => observer.observe(section));
+
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <>
@@ -27,7 +64,16 @@ export default function Home() {
         <button className="menu-toggle" aria-expanded={menu} aria-controls="navigation" onClick={() => setMenu(!menu)} onKeyDown={e => { if (e.key === "Escape") setMenu(false); }}>{menu ? "Fermer −" : "Menu +"}</button>
         <nav id="navigation" className={menu ? "nav open" : "nav"} aria-label="Navigation principale" onClick={() => setMenu(false)}>
           <a className="mobile-auth-link" href="/connexion">Se connecter</a><a className="mobile-auth-link" href="/inscription">Créer un espace</a>
-          <a href="#plateforme">La plateforme</a><a href="#fonctionnement">Comment ça marche</a><a href="#usages">Pour qui ?</a><a href="#api">API</a><a href="#questions">Vos questions</a>
+          {navItems.map((item) => (
+            <a
+              key={item.id}
+              href={`#${item.id}`}
+              className={activeSection === item.id ? "nav-link active" : "nav-link"}
+              aria-current={activeSection === item.id ? "page" : undefined}
+            >
+              {item.label}
+            </a>
+          ))}
         </nav>
         <a className="button small header-cta" href="#fonctionnement">Découvrir Signeo <Arrow /></a>
       </header>

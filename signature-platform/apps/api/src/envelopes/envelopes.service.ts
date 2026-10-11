@@ -544,8 +544,8 @@ export class EnvelopesService {
       };
     });
     const deliveries = await Promise.all(result.invitations.map(async (invite) => {
-      try { return { email: invite.email, ...(await this.mail.sendInvitation({ to: invite.email, recipientName: invite.name, signingUrl: invite.signingUrl, envelopeTitle: result.envelope.title, expiresAt: result.envelope.expiresAt })) }; }
-      catch (error) { return { email: invite.email, delivered: false, reason: error instanceof Error ? error.message : 'EMAIL_FAILED' }; }
+      try { return { id: invite.id, email: invite.email, ...(await this.mail.sendInvitation({ to: invite.email, recipientName: invite.name, signingUrl: invite.signingUrl, envelopeTitle: result.envelope.title, expiresAt: result.envelope.expiresAt })) }; }
+      catch (error) { return { id: invite.id, email: invite.email, delivered: false, reason: error instanceof Error ? error.message : 'EMAIL_FAILED' }; }
     }));
     await Promise.all(deliveries.map((delivery) => this.events.save(this.events.create({
       envelope: { id } as Envelope,
