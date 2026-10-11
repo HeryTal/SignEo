@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { EnvelopesModule } from './envelopes/envelopes.module.js';
 import { WorkspacesModule } from './workspaces/workspaces.module.js';
 import { DeveloperModule } from './developer/developer.module.js';
+import { BillingModule } from './billing/billing.module.js';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { DeveloperModule } from './developer/developer.module.js';
       username: process.env.DATABASE_USER ?? 'signeo',
       password: process.env.DATABASE_PASSWORD ?? 'signeo_dev_password',
       database: process.env.DATABASE_NAME ?? 'signeo',
+      schema: process.env.DATABASE_SCHEMA ?? 'public',
       autoLoadEntities: true,
       synchronize: process.env.NODE_ENV !== 'production',
       ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
@@ -25,6 +27,7 @@ import { DeveloperModule } from './developer/developer.module.js';
     AuthModule,
     WorkspacesModule,
     DeveloperModule,
+    BillingModule,
     EnvelopesModule,
   ],
   controllers: [AppController],

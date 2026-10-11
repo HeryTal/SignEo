@@ -1,8 +1,9 @@
-import { BadRequestException, Body, Controller, Get, Patch, Post, Query, Request, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Patch, Post, Query, Request, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request as ExpressRequest, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
 import { GoogleOAuthService } from './google-oauth.service.js';
+import { IdentityVerificationService } from '../users/identity-verification.service.js';
 
 type SignupBody = { name?: string; email?: string; password?: string };
 type LoginBody = { email?: string; password?: string };
@@ -11,7 +12,7 @@ type BrandingBody = { displayName?: string; accentColor?: string; logoUrl?: stri
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService, private readonly google: GoogleOAuthService) {}
+  constructor(private readonly auth: AuthService, private readonly google: GoogleOAuthService, private readonly identity: IdentityVerificationService) {}
 
   @Post('signup')
   signup(@Body() body: SignupBody) {
@@ -91,6 +92,31 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@Request() request: { user: { sub: string; email: string } }) {
     return this.auth.getProfile(request.user.sub);
+  }
+
+  @Get('identity-verification')
+  @UseGuards(JwtAuthGuard)
+  identityStatus(@Request() request: { user: { sub: string } }) { return this.identity.status(request.user.sub); }
+
+  @Post('identity-verification')
+  @UseGuards(JwtAuthGuard)
+  startIdentityVerification(@Request() request: { user: { sub: string } }) { return this.identity.start(request.user.sub); }
+
+  @Post('identity-verification/callback')
+  identityCallback(
+    @Headers('x-identity-signature') signature: string | undefined,
+    @Body() body: { reference?: string; status?: 'VERIFIED' | 'REJECTED'; reason?: string },
+  ) {
+    if (!body.reference || !body.status) throw new BadRequestException('Référence et statut requis.');
+    return this.identity.providerCallback(signature, body.reference, body.status, body.reason);
+  }
+
+  @Post('identity-verification/stripe-webhook')
+  stripeIdentityWebhook(
+    @Headers('stripe-signature') signature: string | undefined,
+    @Req() request: ExpressRequest & { rawBody?: Buffer },
+  ) {
+    return this.identity.stripeWebhook(signature, request.rawBody);
   }
 
   @Patch('branding')

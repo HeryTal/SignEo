@@ -8,7 +8,7 @@ import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { compare, hash } from 'bcryptjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, LessThan, Repository } from 'typeorm';
 import { User } from '../users/user.entity.js';
 import { AuditEvent } from './audit-event.entity.js';
 import {
@@ -17,6 +17,7 @@ import {
   EnvelopeField,
 } from './envelope.entity.js';
 import { EnvelopeDocument } from './envelope-document.entity.js';
+import { EnvelopeTemplate } from './envelope-template.entity.js';
 import { Recipient } from './recipient.entity.js';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { pdflibAddPlaceholder } from '@signpdf/placeholder-pdf-lib';
@@ -116,6 +117,8 @@ export class EnvelopesService {
     private readonly envelopes: Repository<Envelope>,
     @InjectRepository(EnvelopeDocument)
     private readonly documents: Repository<EnvelopeDocument>,
+    @InjectRepository(EnvelopeTemplate)
+    private readonly templates: Repository<EnvelopeTemplate>,
     @InjectRepository(Recipient)
     private readonly recipients: Repository<Recipient>,
     @InjectRepository(AuditEvent)
@@ -141,6 +144,7 @@ export class EnvelopesService {
     preparationSettings: Envelope['preparationSettings'] = {},
     apiEnvironment: Envelope['apiEnvironment'] = 'PRODUCTION',
     workspaceId?: string,
+    templateSigningOrders?: number[],
   ) {
     if (!preparationSettings || !['SIMULTANEOUS', 'SEQUENTIAL', 'CUSTOM'].includes(preparationSettings.signingMode ?? 'SEQUENTIAL'))
       throw new BadRequestException('Ordre des destinataires invalide.');
@@ -383,11 +387,11 @@ export class EnvelopesService {
             name: recipient.name.trim(),
             email: recipient.email.trim().toLowerCase(),
             role: recipient.role ?? 'SIGNER',
-            signingOrder: preparationSettings.signingMode === 'CUSTOM' || !preparationSettings.signingMode
+            signingOrder: templateSigningOrders?.[index] ?? (preparationSettings.signingMode === 'CUSTOM' || !preparationSettings.signingMode
               ? index + 1
               : recipient.role === 'APPROVER' ? 1
                 : preparationSettings.signingMode === 'SIMULTANEOUS' ? 2
-                  : recipientsInput.slice(0, index + 1).filter((item) => item.role !== 'APPROVER').length + 1,
+                  : recipientsInput.slice(0, index + 1).filter((item) => item.role !== 'APPROVER').length + 1),
             accessToken: randomUUID().replaceAll('-', ''),
             status: 'WAITING',
             signatureLevel: recipient.signatureLevel ?? 'SIMPLE',
@@ -454,6 +458,167 @@ export class EnvelopesService {
     }));
   }
 
+  async listTemplates(ownerId: string) {
+    const membership = await this.workspaces.activeForUser(ownerId);
+    const items = await this.templates.createQueryBuilder('template')
+      .where('template.workspaceId = :workspaceId', { workspaceId: membership.workspace.id })
+      .orWhere('template.workspaceId IS NULL AND template.ownerId = :ownerId', { ownerId })
+      .orderBy('template.createdAt', 'DESC')
+      .getMany();
+    return items.map(({ id, title, message, recipients, expirationDays, createdAt }) => ({
+      id,
+      title,
+      message,
+      recipients,
+      expirationDays,
+      createdAt,
+    }));
+  }
+
+  async createTemplate(ownerId: string, envelopeId: string, title: string) {
+    const membership = await this.workspaces.activeForUser(ownerId);
+    this.workspaces.requirePermission(membership.role, 'ENVELOPE_MANAGE');
+    const source = await this.envelopes.findOne({
+      where: { id: envelopeId },
+      relations: { documents: true, recipients: true, owner: true, workspace: true },
+    });
+    this.assertReadable(source, ownerId, membership);
+    if (!source.documents.length || !source.recipients.length) {
+      throw new BadRequestException('Un document avec ses destinataires est nécessaire pour créer un modèle.');
+    }
+    const label = title.trim();
+    if (!label || label.length > 180) {
+      throw new BadRequestException('Le nom du modèle doit contenir entre 1 et 180 caractères.');
+    }
+    const orderedRecipients = [...source.recipients].sort((a, b) => a.signingOrder - b.signingOrder);
+    const files: EnvelopeTemplate['documents'] = [];
+    const copiedFiles: string[] = [];
+    try {
+      for (const document of this.orderedDocuments(source)) {
+        const storageName = `${randomUUID()}-template${extname(document.originalName).toLowerCase()}`;
+        await writeFile(join(this.uploadDirectory, storageName), await readFile(join(this.uploadDirectory, document.storageName)), { flag: 'wx' });
+        copiedFiles.push(join(this.uploadDirectory, storageName));
+        files.push({
+          originalName: document.originalName,
+          storageName,
+          mimeType: document.mimeType,
+          size: Number(document.size),
+          checksum: document.checksum,
+        });
+      }
+      const templateFields = (source.fields ?? []).map((field) => {
+        const recipientSlot = orderedRecipients.findIndex((recipient) => recipient.email === field.recipientEmail);
+        const { recipientEmail: _recipientEmail, ...fieldData } = field;
+        void _recipientEmail;
+        return { ...fieldData, recipientSlot: recipientSlot < 0 ? undefined : recipientSlot };
+      });
+      const templateCollections = (source.collectionRequests ?? []).map((request) => {
+        const recipientSlot = orderedRecipients.findIndex((recipient) => recipient.email === request.recipientEmail);
+        const { recipientEmail: _recipientEmail, ...requestData } = request;
+        void _recipientEmail;
+        return { ...requestData, recipientSlot };
+      });
+      const template = this.templates.create({
+        title: label,
+        message: source.message,
+        documents: files,
+        fields: templateFields,
+        recipients: orderedRecipients.map((recipient, index) => ({
+          name: `${recipient.role === 'APPROVER' ? 'Approbateur' : 'Signataire'} ${index + 1}`,
+          role: recipient.role as 'SIGNER' | 'APPROVER',
+          signingOrder: recipient.signingOrder,
+          signatureLevel: recipient.signatureLevel,
+          authenticationMethod: recipient.authenticationMethod,
+        })),
+        collectionRequests: templateCollections,
+        preparationSettings: {
+          ...source.preparationSettings,
+          documentOrder: undefined,
+          documentVisibility: undefined,
+          documentVisibilitySlots: source.preparationSettings?.documentVisibility?.map((emails) =>
+            emails.map((email) => orderedRecipients.findIndex((recipient) => recipient.email === email)),
+          ),
+        },
+        allowDecline: source.allowDecline,
+        expirationDays: source.expiresAt && source.expiresAt.getTime() > source.createdAt.getTime()
+          ? Math.min(366, Math.max(1, Math.ceil((source.expiresAt.getTime() - source.createdAt.getTime()) / (24 * 60 * 60 * 1000))))
+          : null,
+        owner: source.owner,
+        workspace: source.workspace,
+      });
+      const saved = await this.templates.save(template);
+      return { id: saved.id, title: saved.title, createdAt: saved.createdAt };
+    } catch (error) {
+      const { unlink } = await import('node:fs/promises');
+      await Promise.all(copiedFiles.map((path) => unlink(path).catch(() => undefined)));
+      throw error;
+    }
+  }
+
+  async sendFromTemplate(ownerId: string, templateId: string, recipientsInput: IncomingRecipient[], webOrigin: string) {
+    const membership = await this.workspaces.activeForUser(ownerId);
+    this.workspaces.requirePermission(membership.role, 'ENVELOPE_MANAGE');
+    const template = await this.templates.findOne({
+      where: { id: templateId },
+      relations: { owner: true, workspace: true },
+    });
+    if (!template || (template.workspace ? template.workspace.id !== membership.workspace.id : template.owner.id !== ownerId)) {
+      throw new NotFoundException('Modèle introuvable.');
+    }
+    if (recipientsInput.length !== template.recipients.length) {
+      throw new BadRequestException('Renseignez exactement le nombre de destinataires défini par le modèle.');
+    }
+    const uploadedFiles: UploadedFile[] = await Promise.all(template.documents.map(async (document) => ({
+      originalname: document.originalName,
+      mimetype: document.mimeType,
+      size: document.size,
+      buffer: await readFile(join(this.uploadDirectory, document.storageName)),
+    })));
+    const orderedSlots = [...template.recipients];
+    const fields = template.fields.map((value) => {
+      const { recipientSlot, ...field } = value;
+      const slot = typeof recipientSlot === 'number' ? recipientSlot : -1;
+      const recipient = recipientsInput[slot];
+      return {
+        ...field,
+        ...(recipient ? { recipientEmail: recipient.email.trim().toLowerCase() } : {}),
+      };
+    }) as IncomingField[];
+    const collectionRequests = template.collectionRequests.map((value) => {
+      const { recipientSlot, ...request } = value;
+      const recipient = typeof recipientSlot === 'number' ? recipientsInput[recipientSlot] : undefined;
+      return { ...request, ...(recipient ? { recipientEmail: recipient.email.trim().toLowerCase() } : {}) };
+    }) as IncomingCollectionRequest[];
+    const created = await this.create(
+      ownerId,
+      template.title,
+      template.message,
+      recipientsInput.map((recipient, index) => ({
+        ...recipient,
+        role: orderedSlots[index].role,
+        signatureLevel: orderedSlots[index].signatureLevel,
+        authenticationMethod: orderedSlots[index].authenticationMethod,
+      })),
+      uploadedFiles,
+      fields,
+      template.expirationDays
+        ? new Date(Date.now() + template.expirationDays * 24 * 60 * 60 * 1000).toISOString()
+        : undefined,
+      template.allowDecline,
+      collectionRequests,
+      {
+        ...template.preparationSettings,
+        documentVisibility: template.preparationSettings.documentVisibilitySlots?.map((slots) =>
+          slots.map((slot) => recipientsInput[slot].email.trim().toLowerCase()),
+        ) ?? template.preparationSettings.documentVisibility,
+      },
+      'PRODUCTION',
+      undefined,
+      orderedSlots.map((slot) => slot.signingOrder),
+    );
+    return this.send(ownerId, created.id, webOrigin);
+  }
+
   async get(ownerId: string, id: string) {
     const membership = await this.workspaces.activeForUser(ownerId);
     const envelope = await this.envelopes.findOne({
@@ -506,8 +671,9 @@ export class EnvelopesService {
     const membership = workspaceId
       ? await this.workspaceMembers.findOneOrFail({ where: { workspace: { id: workspaceId }, user: { id: ownerId } }, relations: { workspace: true } })
       : await this.workspaces.activeForUser(ownerId);
-    this.workspaces.requireWrite(membership.role);
+    this.workspaces.requirePermission(membership.role, 'ENVELOPE_MANAGE');
     const result = await this.dataSource.transaction(async (manager) => {
+      await this.lockEnvelope(manager, id);
       const envelope = await manager.getRepository(Envelope).findOne({
         where: { id },
         relations: { documents: true, recipients: true, owner: true, workspace: true },
@@ -516,6 +682,8 @@ export class EnvelopesService {
       if (environment && envelope.apiEnvironment !== environment) throw new NotFoundException('Enveloppe introuvable dans cet environnement.');
       if (envelope.status !== 'DRAFT')
         throw new BadRequestException('Cette enveloppe a déjà été envoyée.');
+      if (envelope.expiresAt && envelope.expiresAt.getTime() <= Date.now())
+        throw new BadRequestException('Cette enveloppe a expiré.');
       if (
         !envelope.documents.length ||
         !envelope.recipients.some((recipient) => recipient.role === 'SIGNER')
@@ -523,8 +691,10 @@ export class EnvelopesService {
         throw new BadRequestException(
           'Un document et un signataire sont nécessaires.',
         );
+      const quotaWorkspace = await manager.getRepository(Workspace).findOneOrFail({ where: { id: membership.workspace.id }, relations: { organization: true } });
+      await assertSendQuota(manager, quotaWorkspace.organization.id);
       envelope.status = 'SENT';
-      await manager.save(envelope);
+      await manager.save(Envelope, { id: envelope.id, status: envelope.status });
       await manager.save(AuditEvent, {
         envelope,
         actor: envelope.owner,
@@ -539,11 +709,14 @@ export class EnvelopesService {
           name: recipient.name,
           email: recipient.email,
           role: recipient.role,
+          signingOrder: recipient.signingOrder,
+          active: recipient.signingOrder === Math.min(...envelope.recipients.map((item) => item.signingOrder)),
           signingUrl: `${webOrigin}/signer/${recipient.accessToken}`,
         })),
       };
     });
-    const deliveries = await Promise.all(result.invitations.map(async (invite) => {
+    const firstOrder = Math.min(...result.invitations.map((invite) => invite.signingOrder));
+    const deliveries = await Promise.all(result.invitations.filter((invite) => invite.signingOrder === firstOrder).map(async (invite) => {
       try { return { id: invite.id, email: invite.email, ...(await this.mail.sendInvitation({ to: invite.email, recipientName: invite.name, signingUrl: invite.signingUrl, envelopeTitle: result.envelope.title, expiresAt: result.envelope.expiresAt })) }; }
       catch (error) { return { id: invite.id, email: invite.email, delivered: false, reason: error instanceof Error ? error.message : 'EMAIL_FAILED' }; }
     }));
@@ -565,30 +738,98 @@ export class EnvelopesService {
     return this.send(member.user.id, id, webOrigin, workspaceId, environment);
   }
 
+  async remind(ownerId: string, envelopeId: string, recipientId: string, webOrigin: string) {
+    const membership = await this.workspaces.activeForUser(ownerId);
+    this.workspaces.requirePermission(membership.role, 'ENVELOPE_MANAGE');
+    const recipient = await this.recipients.findOne({
+      where: { id: recipientId, envelope: { id: envelopeId } },
+      relations: { envelope: { owner: true, workspace: true, recipients: true } },
+    });
+    this.assertReadable(recipient?.envelope, ownerId, membership);
+    if (!['SENT', 'PARTIALLY_SIGNED'].includes(recipient.envelope.status) || recipient.status !== 'WAITING') {
+      throw new BadRequestException('Ce destinataire n’attend plus de réponse.');
+    }
+    if (recipient.envelope.expiresAt && recipient.envelope.expiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException('Cette enveloppe a expiré.');
+    }
+    const previousRecipient = (recipient.envelope.recipients ?? []).find(
+      (item) => item.signingOrder < recipient.signingOrder && !['SIGNED', 'APPROVED'].includes(item.status),
+    );
+    if (previousRecipient) {
+      throw new BadRequestException(`Le rappel sera disponible après la réponse de ${previousRecipient.name}.`);
+    }
+    const delivery = await this.mail.sendReminder({
+      to: recipient.email,
+      recipientName: recipient.name,
+      envelopeTitle: recipient.envelope.title,
+      signingUrl: `${webOrigin}/signer/${recipient.accessToken}`,
+      expiresAt: recipient.envelope.expiresAt,
+    });
+    if (!delivery.delivered) {
+      throw new BadRequestException('Le service e-mail n’est pas configuré pour envoyer les rappels.');
+    }
+    recipient.lastRemindedAt = new Date();
+    await this.recipients.update(recipient.id, { lastRemindedAt: recipient.lastRemindedAt });
+    await this.events.save(this.events.create({
+      envelope: recipient.envelope,
+      actor: { id: ownerId } as User,
+      actorEmail: recipient.envelope.owner.email,
+      action: 'REMINDER_EMAIL_SENT',
+      details: { recipientId: recipient.id, recipientEmail: recipient.email, manual: true },
+    }));
+    return { delivered: true };
+  }
+
+  async cancel(ownerId: string, envelopeId: string) {
+    const membership = await this.workspaces.activeForUser(ownerId);
+    this.workspaces.requirePermission(membership.role, 'ENVELOPE_MANAGE');
+    return this.dataSource.transaction(async (manager) => {
+      await this.lockEnvelope(manager, envelopeId);
+      const envelope = await manager.getRepository(Envelope).findOne({
+        where: { id: envelopeId },
+        relations: { owner: true, workspace: true, recipients: true },
+      });
+      this.assertReadable(envelope, ownerId, membership);
+      if (await this.expireEnvelopeIfPast(envelope, manager)) {
+        throw new BadRequestException('Cette enveloppe a expiré.');
+      }
+      if (!['SENT', 'PARTIALLY_SIGNED'].includes(envelope.status)) {
+        throw new BadRequestException('Seule une enveloppe envoyée ou en cours peut être annulée.');
+      }
+      envelope.status = 'VOIDED';
+      await manager.save(Envelope, { id: envelope.id, status: envelope.status });
+      await manager.save(AuditEvent, {
+        envelope,
+        actor: envelope.owner,
+        actorEmail: envelope.owner.email,
+        action: 'ENVELOPE_VOIDED',
+        details: { reason: 'Annulée par le propriétaire' },
+      });
+      return { status: envelope.status };
+    });
+  }
+
   async getPublicInvitation(token: string) {
     const recipient = await this.recipients.findOne({
       where: { accessToken: token },
       relations: { envelope: { documents: true, recipients: true } },
     });
+    if (!recipient) throw new NotFoundException('Invitation introuvable ou déjà traitée.');
+    if (await this.expireEnvelopeIfPast(recipient.envelope)) {
+      throw new BadRequestException('Cette invitation a expiré.');
+    }
     if (
-      !recipient ||
       recipient.envelope.status === 'DRAFT' ||
       recipient.envelope.status === 'EXPIRED' ||
+      ['VOIDED', 'COMPLETED'].includes(recipient.envelope.status) ||
       ['SIGNED', 'APPROVED'].includes(recipient.status)
     )
       throw new NotFoundException('Invitation introuvable ou déjà traitée.');
+    this.assertRecipientStepIsActive(recipient);
     if (!recipient.viewedAt) {
       recipient.viewedAt = new Date();
-      await this.recipients.save(recipient);
+      await this.recipients.update(recipient.id, { viewedAt: recipient.viewedAt });
       await this.events.save(this.events.create({ envelope: recipient.envelope, actor: null, actorEmail: recipient.email, action: 'INVITATION_VIEWED', details: {} }));
-    }
-    if (
-      recipient.envelope.expiresAt &&
-      recipient.envelope.expiresAt.getTime() < Date.now()
-    ) {
-      recipient.envelope.status = 'EXPIRED';
-      await this.envelopes.save(recipient.envelope);
-      throw new BadRequestException('Cette invitation a expiré.');
     }
     return {
       recipient: {
@@ -678,16 +919,23 @@ export class EnvelopesService {
   ) {
     const recipient = await this.recipients.findOne({
       where: { accessToken: token },
-      relations: { envelope: true },
+      relations: { envelope: { recipients: true } },
     });
+    if (!recipient) {
+      throw new NotFoundException('Cette invitation n’est plus disponible.');
+    }
+    if (await this.expireEnvelopeIfPast(recipient.envelope)) {
+      throw new BadRequestException('Cette invitation a expiré.');
+    }
     if (
-      !recipient ||
       recipient.envelope.status === 'DRAFT' ||
       recipient.envelope.status === 'EXPIRED' ||
+      ['VOIDED', 'COMPLETED'].includes(recipient.envelope.status) ||
       ['SIGNED', 'APPROVED', 'DECLINED'].includes(recipient.status)
     ) {
       throw new NotFoundException('Cette invitation n’est plus disponible.');
     }
+    this.assertRecipientStepIsActive(recipient);
     const request = (recipient.envelope.collectionRequests ?? []).find(
       (item) =>
         item.id === requestId && item.recipientEmail === recipient.email,
@@ -713,7 +961,7 @@ export class EnvelopesService {
         uploadedAt: new Date().toISOString(),
       },
     ];
-    await this.recipients.save(recipient);
+    await this.recipients.update(recipient.id, { collectionFiles: recipient.collectionFiles });
     await this.events.save(
       this.events.create({
         envelope: recipient.envelope,
@@ -729,14 +977,19 @@ export class EnvelopesService {
   async publicDocument(token: string, documentId: string) {
     const recipient = await this.recipients.findOne({
       where: { accessToken: token },
-      relations: { envelope: { documents: true } },
+      relations: { envelope: { documents: true, recipients: true } },
     });
+    if (!recipient) throw new NotFoundException('Invitation introuvable.');
+    if (await this.expireEnvelopeIfPast(recipient.envelope)) {
+      throw new BadRequestException('Cette invitation a expiré.');
+    }
     if (
-      !recipient ||
       recipient.envelope.status === 'DRAFT' ||
-      recipient.envelope.status === 'EXPIRED'
+      recipient.envelope.status === 'EXPIRED' ||
+      ['VOIDED', 'COMPLETED'].includes(recipient.envelope.status)
     )
       throw new NotFoundException('Invitation introuvable.');
+    this.assertRecipientStepIsActive(recipient);
     const document = recipient.envelope.documents.find(
       (item) => item.id === documentId,
     );
@@ -788,11 +1041,15 @@ export class EnvelopesService {
   }
 
   async requestEmailOtp(token: string) {
-    const recipient = await this.recipients.findOne({ where: { accessToken: token }, relations: { envelope: true } });
-    if (!recipient || recipient.authenticationMethod !== 'EMAIL_OTP' || ['SIGNED', 'APPROVED'].includes(recipient.status)) throw new NotFoundException('Vérification indisponible pour cette invitation.');
+    const recipient = await this.recipients.findOne({ where: { accessToken: token }, relations: { envelope: { recipients: true } } });
+    if (!recipient || !['SENT', 'PARTIALLY_SIGNED'].includes(recipient.envelope.status) || recipient.authenticationMethod !== 'EMAIL_OTP' || ['SIGNED', 'APPROVED', 'DECLINED'].includes(recipient.status)) throw new NotFoundException('Vérification indisponible pour cette invitation.');
+    if (await this.expireEnvelopeIfPast(recipient.envelope)) {
+      throw new BadRequestException('Cette invitation a expiré.');
+    }
+    this.assertRecipientStepIsActive(recipient);
     const code = randomInt(100000, 1_000_000).toString();
     recipient.otpHash = await hash(code, 10); recipient.otpExpiresAt = new Date(Date.now() + 10 * 60_000); recipient.otpVerifiedAt = null; recipient.otpAttempts = 0;
-    await this.recipients.save(recipient);
+    await this.recipients.update(recipient.id, { otpHash: recipient.otpHash, otpExpiresAt: recipient.otpExpiresAt, otpVerifiedAt: null, otpAttempts: 0 });
     const delivery = await this.mail.sendOtp(recipient.email, recipient.name, recipient.envelope.title, code);
     if (!delivery.delivered) throw new BadRequestException('Le service e-mail n’est pas configuré pour envoyer le code.');
     await this.events.save(this.events.create({ envelope: recipient.envelope, actor: null, actorEmail: recipient.email, action: 'EMAIL_OTP_SENT', details: { expiresAt: recipient.otpExpiresAt.toISOString() } }));
@@ -811,14 +1068,19 @@ export class EnvelopesService {
         'Confirmez votre nom et votre accord avant de signer.',
       );
     const result = await this.dataSource.transaction(async (manager) => {
+      await this.lockInvitationEnvelope(manager, token);
       const recipient = await manager.getRepository(Recipient).findOne({
         where: { accessToken: token },
         relations: { envelope: { recipients: true, documents: true } },
       });
+      if (recipient && await this.expireEnvelopeIfPast(recipient.envelope, manager)) {
+        throw new BadRequestException('Cette invitation a expiré.');
+      }
       if (
         !recipient ||
         recipient.envelope.status === 'DRAFT' ||
         recipient.envelope.status === 'EXPIRED' ||
+        ['VOIDED', 'COMPLETED'].includes(recipient.envelope.status) ||
         ['SIGNED', 'APPROVED'].includes(recipient.status)
       )
         throw new NotFoundException('Invitation introuvable ou déjà traitée.');
@@ -834,9 +1096,10 @@ export class EnvelopesService {
         recipient.envelope.expiresAt.getTime() < Date.now()
       ) {
         recipient.envelope.status = 'EXPIRED';
-        await manager.save(recipient.envelope);
+        await manager.save(Envelope, { id: recipient.envelope.id, status: recipient.envelope.status });
         throw new BadRequestException('Cette invitation a expiré.');
       }
+      this.assertRecipientStepIsActive(recipient);
       const envelopeFields = (recipient.envelope.fields ?? []).filter(
         (field) =>
           !field.recipientEmail || field.recipientEmail === recipient.email,
@@ -849,6 +1112,23 @@ export class EnvelopesService {
       for (const field of envelopeFields) {
         if (field.type === 'SIGN_DATE' && fieldValues[field.id] !== undefined && !isCalendarDate(fieldValues[field.id]))
           throw new BadRequestException('Sélectionnez une date valide dans le calendrier.');
+        const signatureImage = field.type === 'SIGNATURE' ? fieldValues[field.id] : undefined;
+        if (signatureImage?.startsWith('data:image/png;base64,')) {
+          const encoded = signatureImage.slice('data:image/png;base64,'.length);
+          const image = Buffer.from(encoded, 'base64');
+          if (
+            encoded.length > 180_000 ||
+            !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) ||
+            image.length < 24 ||
+            image.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' ||
+            image.readUInt32BE(16) > 1200 ||
+            image.readUInt32BE(20) > 300 ||
+            image.readUInt32BE(16) === 0 ||
+            image.readUInt32BE(20) === 0
+          ) {
+            throw new BadRequestException('Le fichier de signature dessinée est invalide ou trop volumineux.');
+          }
+        }
       }
       if (
         requiredCollections.some(
@@ -887,7 +1167,7 @@ export class EnvelopesService {
         throw new BadRequestException(
           'Complétez tous les champs texte avant de continuer.',
         );
-      const previousRecipient = recipient.envelope.recipients.find(
+      const previousRecipient = (recipient.envelope.recipients ?? []).find(
         (item) =>
           item.signingOrder < recipient.signingOrder &&
           !['SIGNED', 'APPROVED'].includes(item.status),
@@ -901,7 +1181,9 @@ export class EnvelopesService {
       const completedFieldValues = { ...fieldValues };
       for (const field of envelopeFields) {
         if (field.type === 'SIGNATURE')
-          completedFieldValues[field.id] = signatureName.trim();
+          completedFieldValues[field.id] = fieldValues[field.id]?.startsWith('data:image/png;base64,')
+            ? fieldValues[field.id]
+            : signatureName.trim();
         if (field.type === 'SIGN_DATE')
           completedFieldValues[field.id] = fieldValues[field.id] ?? field.dateValue ?? recipient.signedAt.toISOString().slice(0, 10);
         if (field.type === 'SIGNER_NAME')
@@ -918,7 +1200,7 @@ export class EnvelopesService {
       recipient.envelope.status = allCompleted
         ? 'COMPLETED'
         : 'PARTIALLY_SIGNED';
-      await manager.save(recipient.envelope);
+      await manager.save(Envelope, { id: recipient.envelope.id, status: recipient.envelope.status });
       await manager.save(AuditEvent, {
         envelope: recipient.envelope,
         actor: null,
@@ -955,20 +1237,62 @@ export class EnvelopesService {
           await this.events.save(this.events.create({ envelope: completedEnvelope, actor: null, actorEmail: completedEnvelope.owner.email, action: delivery.delivered ? 'COMPLETION_EMAIL_SENT' : 'COMPLETION_EMAIL_PENDING', details: delivery.delivered ? {} : { reason: delivery.reason } }));
         } catch (error) { console.error('Completion email failed:', error); }
       }
+    } else {
+      await this.dataSource.transaction(async (manager) => {
+        await this.lockEnvelope(manager, result.envelopeId);
+        const pendingEnvelope = await manager.getRepository(Envelope).findOne({
+          where: { id: result.envelopeId },
+          relations: { recipients: true, owner: true },
+        });
+        if (pendingEnvelope && ['SENT', 'PARTIALLY_SIGNED'].includes(pendingEnvelope.status) && !(await this.expireEnvelopeIfPast(pendingEnvelope, manager))) {
+          const waiting = pendingEnvelope.recipients.filter((item) => item.status === 'WAITING');
+          const nextOrder = Math.min(...waiting.map((item) => item.signingOrder));
+          const newlyActive = waiting.filter((item) => item.signingOrder === nextOrder && !item.lastRemindedAt);
+          for (const nextRecipient of newlyActive) {
+            try {
+              const webOrigin = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
+              const delivery = await this.mail.sendInvitation({
+                to: nextRecipient.email,
+                recipientName: nextRecipient.name,
+                envelopeTitle: pendingEnvelope.title,
+                signingUrl: `${webOrigin}/signer/${nextRecipient.accessToken}`,
+                expiresAt: pendingEnvelope.expiresAt,
+              });
+              if (!delivery.delivered) continue;
+              nextRecipient.lastRemindedAt = new Date();
+              await manager.getRepository(Recipient).update(nextRecipient.id, { lastRemindedAt: nextRecipient.lastRemindedAt });
+              await manager.save(AuditEvent, {
+                envelope: pendingEnvelope,
+                actor: null,
+                actorEmail: nextRecipient.email,
+                action: 'INVITATION_EMAIL_SENT',
+                details: { sequentialStep: nextOrder },
+              });
+            } catch (error) {
+              console.error('Next sequential invitation email failed:', error);
+            }
+          }
+        }
+      });
     }
     return result;
   }
 
   async decline(token: string, reason: string) {
     return this.dataSource.transaction(async (manager) => {
+      await this.lockInvitationEnvelope(manager, token);
       const recipient = await manager.getRepository(Recipient).findOne({
         where: { accessToken: token },
         relations: { envelope: { recipients: true } },
       });
+      if (recipient && await this.expireEnvelopeIfPast(recipient.envelope, manager)) {
+        throw new BadRequestException('Cette invitation a expiré.');
+      }
       if (
         !recipient ||
         recipient.envelope.status === 'DRAFT' ||
         recipient.envelope.status === 'EXPIRED' ||
+        ['VOIDED', 'COMPLETED'].includes(recipient.envelope.status) ||
         ['SIGNED', 'APPROVED', 'DECLINED'].includes(recipient.status)
       ) {
         throw new NotFoundException('Invitation introuvable ou déjà traitée.');
@@ -978,6 +1302,7 @@ export class EnvelopesService {
           'Le refus de signature n’est pas autorisé pour cette invitation.',
         );
       }
+      this.assertRecipientStepIsActive(recipient);
       if (
         recipient.envelope.expiresAt &&
         recipient.envelope.expiresAt.getTime() < Date.now()
@@ -987,7 +1312,7 @@ export class EnvelopesService {
       recipient.status = 'DECLINED';
       recipient.envelope.status = 'VOIDED';
       await manager.save(recipient);
-      await manager.save(recipient.envelope);
+      await manager.save(Envelope, { id: recipient.envelope.id, status: recipient.envelope.status });
       await manager.save(AuditEvent, {
         envelope: recipient.envelope,
         actor: null,
@@ -1092,6 +1417,16 @@ export class EnvelopesService {
           if (!page) continue;
           const x = (field.x / 100) * page.getWidth();
           const y = page.getHeight() - (field.y / 100) * page.getHeight() - 14;
+          if (field.type === 'SIGNATURE' && value.startsWith('data:image/png;base64,')) {
+            const image = await pdf.embedPng(Buffer.from(value.slice('data:image/png;base64,'.length), 'base64'));
+            const width = page.getWidth() * (field.width ?? 30) / 100;
+            const height = page.getHeight() * (field.height ?? 9) / 100;
+            page.drawImage(image, { x, y: y - height + 14, width, height });
+            if (field.signatureDisplay === 'DETAILED') {
+              page.drawText(`Signe le ${event.createdAt.toLocaleDateString('fr-FR')} - ${event.actorEmail}`, { x, y: y - height - 2, size: 7, font: defaultFont, maxWidth: width });
+            }
+            continue;
+          }
           const label = field.type === 'CHECKBOX' ? '[x] ' + field.label : field.type === 'SIGN_DATE' && isCalendarDate(value) ? value.split('-').reverse().join('/') : value;
           const family = field.fontFamily ?? 'SANS';
           const chosenFont = family === 'SCRIPT' ? StandardFonts.TimesRomanItalic : family === 'SERIF' ? StandardFonts.TimesRoman : family === 'MONO' ? StandardFonts.Courier : StandardFonts.Helvetica;
@@ -1134,6 +1469,16 @@ export class EnvelopesService {
           if (!page) continue;
           const x = (field.x / 100) * page.getWidth();
           const y = page.getHeight() - (field.y / 100) * page.getHeight() - 14;
+          if (field.type === 'SIGNATURE' && value.startsWith('data:image/png;base64,')) {
+            const image = await pdf.embedPng(Buffer.from(value.slice('data:image/png;base64,'.length), 'base64'));
+            const width = page.getWidth() * (field.width ?? 30) / 100;
+            const height = page.getHeight() * (field.height ?? 9) / 100;
+            page.drawImage(image, { x, y: y - height + 14, width, height });
+            if (field.signatureDisplay === 'DETAILED') {
+              page.drawText(`Signe le ${event.createdAt.toLocaleDateString('fr-FR')} - ${event.actorEmail}`, { x, y: y - height - 2, size: 7, font, maxWidth: width });
+            }
+            continue;
+          }
           const label = field.type === 'CHECKBOX' ? '[x] ' + field.label : field.type === 'SIGN_DATE' && isCalendarDate(value) ? value.split('-').reverse().join('/') : value;
           const family = field.fontFamily ?? 'SANS';
           const chosenFont = family === 'SCRIPT' ? StandardFonts.TimesRomanItalic : family === 'SERIF' ? StandardFonts.TimesRoman : family === 'MONO' ? StandardFonts.Courier : StandardFonts.Helvetica;
@@ -1180,24 +1525,90 @@ export class EnvelopesService {
     return index >= 0 && (!visibility || Boolean(visibility[index]?.includes(email)));
   }
 
+  private assertRecipientStepIsActive(recipient: Recipient) {
+    const previousRecipient = (recipient.envelope.recipients ?? []).find(
+      (item) => item.signingOrder < recipient.signingOrder && !['SIGNED', 'APPROVED'].includes(item.status),
+    );
+    if (previousRecipient) {
+      throw new BadRequestException(`Cette invitation sera disponible après la réponse de ${previousRecipient.name}.`);
+    }
+  }
+
+  // Lock only the parent row: PostgreSQL cannot FOR UPDATE nullable outer joins.
+  // Every status transition takes this lock before reloading recipients.
+  private async lockEnvelope(manager: EntityManager, id: string) {
+    await manager.getRepository(Envelope).findOne({
+      where: { id }, lock: { mode: 'pessimistic_write' },
+    });
+  }
+
+  private async lockInvitationEnvelope(manager: EntityManager, token: string) {
+    const invitation = await manager.getRepository(Recipient).findOne({
+      where: { accessToken: token }, relations: { envelope: true },
+    });
+    if (!invitation) throw new NotFoundException('Invitation introuvable.');
+    await this.lockEnvelope(manager, invitation.envelope.id);
+  }
+
+  private async expireEnvelopeIfPast(
+    envelope: Envelope,
+    manager?: { getRepository(target: typeof Envelope): Repository<Envelope> },
+  ) {
+    if (!envelope.expiresAt || envelope.expiresAt.getTime() > Date.now()) return false;
+    // Callers inside a transaction reject the action. Do not write an audit event
+    // outside a transaction that will be rolled back by that rejection.
+    if (manager) return true;
+    const changed = await this.envelopes.update(
+      { id: envelope.id, status: In(['SENT', 'PARTIALLY_SIGNED']) },
+      { status: 'EXPIRED' },
+    );
+    if (changed.affected) {
+      envelope.status = 'EXPIRED';
+      await this.events.save(this.events.create({
+        envelope, actor: null, actorEmail: null, action: 'ENVELOPE_EXPIRED',
+        details: { expiresAt: envelope.expiresAt.toISOString() },
+      }));
+    }
+    return true;
+  }
+
   @Cron('0 9 * * *')
   async sendDailyReminders() {
+    const now = Date.now();
+    const expired = await this.envelopes.find({
+      where: [
+        { status: 'SENT', expiresAt: LessThan(new Date(now)) },
+        { status: 'PARTIALLY_SIGNED', expiresAt: LessThan(new Date(now)) },
+      ],
+      relations: { owner: true },
+    });
+    for (const envelope of expired) {
+      await this.expireEnvelopeIfPast(envelope);
+    }
     const pending = await this.recipients.find({
-      where: { status: 'WAITING', envelope: { status: 'SENT' } },
+      where: [
+        { status: 'WAITING', envelope: { status: 'SENT' } },
+        { status: 'WAITING', envelope: { status: 'PARTIALLY_SIGNED' } },
+      ],
       relations: { envelope: true },
     });
-    const now = Date.now();
     for (const recipient of pending) {
       if (recipient.lastRemindedAt && now - recipient.lastRemindedAt.getTime() < 3 * 24 * 60 * 60 * 1000) continue;
       if (recipient.envelope.expiresAt && recipient.envelope.expiresAt.getTime() < now) continue;
+      const previousRecipients = await this.recipients.find({
+        where: { envelope: { id: recipient.envelope.id }, signingOrder: LessThan(recipient.signingOrder) },
+      });
+      if (previousRecipients.some((item) => !['SIGNED', 'APPROVED'].includes(item.status))) continue;
       const origin = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
       try {
         const delivery = await this.mail.sendReminder({ to: recipient.email, recipientName: recipient.name, envelopeTitle: recipient.envelope.title, signingUrl: `${origin}/signer/${recipient.accessToken}`, expiresAt: recipient.envelope.expiresAt });
         if (!delivery.delivered) continue;
         recipient.lastRemindedAt = new Date();
-        await this.recipients.save(recipient);
+        await this.recipients.update(recipient.id, { lastRemindedAt: recipient.lastRemindedAt });
         await this.events.save(this.events.create({ envelope: recipient.envelope, actor: null, actorEmail: recipient.email, action: 'REMINDER_EMAIL_SENT', details: {} }));
       } catch (error) { console.error('Reminder email failed:', error); }
     }
   }
 }
+import { assertSendQuota } from '../billing/quotas.js';
+import { Workspace } from '../workspaces/workspace.entity.js';

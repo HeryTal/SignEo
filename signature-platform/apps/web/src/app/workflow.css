@@ -337,6 +337,7 @@
   gap: 4px;
   flex: 1;
 }
+.detail-recipient .download-collected-file { flex: 0 0 auto; padding: 7px 9px; font-size: 10px; }
 .detail-recipient small,
 .detail-document small,
 .history-event small {
@@ -484,6 +485,17 @@
   color: #506f41;
   font: italic 27px cursive;
 }
+.signature-method-toggle { display: flex; gap: 8px; margin-top: 16px; }
+.signature-method-toggle button { flex: 1; border: 1px solid #ccd5cf; border-radius: 6px; padding: 10px; background: white; color: #314437; }
+.signature-method-toggle button[aria-pressed="true"] { border-color: #496b50; background: #edf4e9; font-weight: 700; }
+.signature-pad-wrap { display: grid; gap: 8px; margin-top: 12px; }
+.signature-pad { display: block; width: 100%; height: 150px; border: 1px dashed #9ba99d; border-radius: 6px; background: #fff; touch-action: none; }
+.signature-preview img { display: block; width: min(100%, 340px); height: 72px; margin: 0 auto; object-fit: contain; }
+.signer-drawn-field { display: flex; align-items: center; justify-content: center; }
+.signer-drawn-field img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.detail-workflow-actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 0 0 16px; padding: 14px 18px; border: 1px solid #dce3df; border-radius: 8px; background: #fff; }
+.detail-workflow-actions p { margin: 0; color: var(--muted); font-size: 12px; }
+.detail-cancel-action { color: #8a3c32; }
 .consent-check {
   display: flex;
   align-items: flex-start;
@@ -673,6 +685,28 @@
 .visibility-table input { margin-right: 8px; }
 .collection-draft { display: grid; gap: 12px; padding: 18px 0; border-bottom: 1px solid #e0e5e0; }
 .pdf-pages-scroll .pdf-page-canvas { max-width: none; }
+.template-create-card, .template-card { padding: 22px; border: 1px solid #dce3df; border-radius: 10px; background: #fff; }
+.template-create-card { margin-bottom: 30px; }
+.template-create-card h2, .template-list-section h2, .template-modal h2 { font: 26px var(--serif); margin: 0 0 8px; }
+.template-create-card > p, .template-modal > p { max-width: 720px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.template-create-card form { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto; align-items: end; gap: 14px; }
+.template-create-card .form-field { margin: 0; }
+.template-create-card select, .template-create-card input { min-height: 42px; border: 1px solid #d7ded7; border-radius: 6px; padding: 10px; }
+.template-notice { padding: 12px 16px; border-radius: 6px; background: #edf6e8; color: #315b45; }
+.template-empty { padding: 25px; background: #f7f9f5; border-radius: 8px; color: var(--muted); font-size: 13px; }
+.template-list { display: grid; gap: 12px; }
+.template-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.template-card .eyebrow { margin: 0 0 5px; color: var(--muted); font-size: 9px; }
+.template-card h3 { margin: 0 0 5px; font-size: 22px; }
+.template-card p:last-child { margin: 0; color: var(--muted); font-size: 11px; }
+.template-modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; overflow: auto; padding: 20px; background: #13251e99; }
+.template-modal { position: relative; width: min(620px, 100%); max-height: 90vh; overflow: auto; padding: 30px; border-radius: 12px; background: #fff; }
+.template-close { position: absolute; top: 12px; right: 16px; border: 0; background: none; font-size: 28px; }
+.template-modal form { display: grid; gap: 12px; }
+.template-recipient { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px; border: 1px solid #e0e6df; border-radius: 7px; }
+.template-recipient legend { padding: 0 6px; font-size: 12px; font-weight: 700; }
+.template-modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 10px; }
+@media(max-width: 760px) { .template-create-card form, .template-recipient { grid-template-columns: 1fr; } .template-card { align-items: flex-start; flex-direction: column; } .detail-workflow-actions { align-items: stretch; flex-direction: column; } }
 @media (max-width: 1100px) { .preparation-workspace { grid-template-columns: 210px minmax(280px, 1fr) 280px; } }
 @media (max-width: 900px) { .preparation-workspace { display: flex; flex-direction: column; height: auto; } .preparation-workspace .document-preview { height: 65vh; } .preparation-workspace .fields-panel, .preparation-workspace .document-list { width: 100%; height: auto; max-height: 60vh; } .signature-display-options { grid-template-columns: 1fr; } }
 .preview-tools {

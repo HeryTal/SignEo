@@ -7,6 +7,7 @@ import { Repository } from 'typeorm';
 import { User, type UserBranding } from '../users/user.entity.js';
 import { WorkspacesService } from '../workspaces/workspaces.service.js';
 import { AuthMailService } from './auth-mail.service.js';
+import { IdentityVerificationService } from '../users/identity-verification.service.js';
 
 @Injectable()
 export class AuthService {
@@ -16,6 +17,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly workspaces: WorkspacesService,
     private readonly mail: AuthMailService,
+    private readonly identity: IdentityVerificationService,
   ) {}
 
   async signup(name: string, email: string, password: string) {
@@ -109,6 +111,7 @@ export class AuthService {
       name: user.name,
       email: user.email,
       branding: this.normalizeBranding(user.branding),
+      identityVerification: await this.identity.status(user.id),
       ...workspace,
     };
   }

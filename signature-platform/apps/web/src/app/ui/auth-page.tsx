@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { SigneoLogo } from "./signeo-logo";
@@ -11,30 +11,25 @@ type AuthPageProps = { mode: "login" | "signup" };
 export default function AuthPage({ mode }: AuthPageProps) {
   const isSignup = mode === "signup";
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [accountCreated, setAccountCreated] = useState(false);
-  const [passwordResetMode, setPasswordResetMode] = useState(false);
-  const [resetToken, setResetToken] = useState("");
+  const [requestError, setError] = useState("");
+  const [requestLoading, setLoading] = useState(false);
+  const query = useSearchParams();
+  const googleError = query.get("google_error");
+  const error = requestError || (googleError ? (googleError === "cancelled" ? "La connexion Google a été annulée." : "La connexion Google n’a pas pu être validée. Réessayez.") : "");
+  const loading = requestLoading || (Boolean(query.get("google_code")) && !error);
+  const accountCreated = !isSignup && query.get("created") === "1";
+  const [resetDismissed, setResetDismissed] = useState(false);
+  const [resetRequested, setResetRequested] = useState(false);
+  const passwordResetMode = resetRequested || (Boolean(query.get("reset")) && !resetDismissed);
+  const resetToken = resetDismissed ? "" : query.get("reset") ?? "";
   const [resetNotice, setResetNotice] = useState("");
   const googleExchangeStarted = useRef(false);
   const router = useRouter();
 
   useEffect(() => {
-    const query = new URLSearchParams(window.location.search);
-    if (!isSignup && new URLSearchParams(window.location.search).get("created") === "1") {
-      setAccountCreated(true);
-    }
     const googleCode = query.get("google_code");
-    const passwordResetToken = query.get("reset");
-    if (passwordResetToken) { setResetToken(passwordResetToken); setPasswordResetMode(true); }
-    const googleError = query.get("google_error");
-    if (googleError) {
-      setError(googleError === "cancelled" ? "La connexion Google a été annulée." : "La connexion Google n’a pas pu être validée. Réessayez.");
-    }
     if (googleCode && !googleExchangeStarted.current) {
       googleExchangeStarted.current = true;
-      setLoading(true);
       fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/auth/google/exchange`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -63,7 +58,7 @@ export default function AuthPage({ mode }: AuthPageProps) {
           .catch(() => undefined);
       }
     }
-  }, [isSignup, router]);
+  }, [isSignup, router, query]);
 
   function loginWithGoogle() {
     window.location.assign(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/auth/google`);
@@ -89,7 +84,7 @@ export default function AuthPage({ mode }: AuthPageProps) {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001"}/auth/password-reset/confirm`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: resetToken, password }) });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.message ?? "Impossible de modifier le mot de passe.");
-      setResetNotice("Mot de passe modifié. Vous pouvez maintenant vous connecter."); setPasswordResetMode(false); setResetToken(""); window.history.replaceState({}, "", "/connexion");
+      setResetNotice("Mot de passe modifié. Vous pouvez maintenant vous connecter."); setResetDismissed(true); setResetRequested(false); router.replace("/connexion");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Erreur réseau."); }
     finally { setLoading(false); }
   }
@@ -153,7 +148,7 @@ export default function AuthPage({ mode }: AuthPageProps) {
             {!resetToken && <div className="auth-field"><label htmlFor="reset-email">Adresse e-mail</label><input id="reset-email" name="email" type="email" autoComplete="email" placeholder="vous@exemple.fr" required /></div>}
             {resetToken && <><div className="auth-field"><label htmlFor="reset-password">Nouveau mot de passe</label><input id="reset-password" name="password" type="password" autoComplete="new-password" minLength={8} placeholder="8 caractères minimum" required /></div><div className="auth-field"><label htmlFor="reset-password-confirmation">Confirmez le mot de passe</label><input id="reset-password-confirmation" name="passwordConfirmation" type="password" autoComplete="new-password" minLength={8} required /></div></>}
             <button className="button auth-submit" type="submit" disabled={loading}>{loading ? "Envoi…" : resetToken ? "Enregistrer le mot de passe" : "Envoyer le lien"}<span aria-hidden="true">↗</span></button>
-            <button type="button" className="auth-text-button" onClick={() => { setPasswordResetMode(false); setResetToken(""); }}>← Retour à la connexion</button>
+            <button type="button" className="auth-text-button" onClick={() => { setResetDismissed(true); setResetRequested(false); }}>← Retour à la connexion</button>
           </form> : <>
           <button className="google-auth-button" type="button" onClick={loginWithGoogle} disabled={loading}>
             <svg className="google-auth-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -170,7 +165,7 @@ export default function AuthPage({ mode }: AuthPageProps) {
             {isSignup && <div className="auth-field"><label htmlFor="full-name">Prénom et nom</label><input id="full-name" name="name" type="text" autoComplete="name" placeholder="Camille Martin" required /></div>}
             <div className="auth-field"><label htmlFor="email">Adresse e-mail</label><input id="email" name="email" type="email" autoComplete="email" placeholder="vous@exemple.fr" required /></div>
             <div className="auth-field">
-              <div className="auth-label-row"><label htmlFor="password">Mot de passe</label>{!isSignup && <button className="auth-text-button" type="button" onClick={() => { setError(""); setResetNotice(""); setPasswordResetMode(true); }}>Mot de passe oublié ?</button>}</div>
+              <div className="auth-label-row"><label htmlFor="password">Mot de passe</label>{!isSignup && <button className="auth-text-button" type="button" onClick={() => { setError(""); setResetNotice(""); setResetRequested(true); }}>Mot de passe oublié ?</button>}</div>
               <div className="auth-password"><input id="password" name="password" type={showPassword ? "text" : "password"} autoComplete={isSignup ? "new-password" : "current-password"} minLength={8} placeholder="8 caractères minimum" required /><button type="button" className="auth-reveal" aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? "Masquer" : "Afficher"}</button></div>
             </div>
             {isSignup && <label className="auth-consent"><input type="checkbox" required /><span>J’accepte les conditions d’utilisation et la politique de confidentialité.</span></label>}

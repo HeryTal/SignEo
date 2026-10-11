@@ -129,6 +129,7 @@ export default function NewEnvelopePage() {
       name: string;
       email: string;
       role: "SIGNER" | "APPROVER";
+      active?: boolean;
       signingUrl: string;
       delivered?: boolean;
       deliveryReason?: string;
@@ -507,7 +508,7 @@ export default function NewEnvelopePage() {
         ),
       );
       setInvitationLinks(
-        (payload.invitations ?? []).map((invite: { name: string; email: string; role: "SIGNER" | "APPROVER"; signingUrl: string }) => {
+        (payload.invitations ?? []).map((invite: { name: string; email: string; role: "SIGNER" | "APPROVER"; active?: boolean; signingUrl: string }) => {
           const delivery = deliveries.get(invite.email) as { delivered: boolean; reason?: string } | undefined;
           return { ...invite, delivered: delivery?.delivered, deliveryReason: delivery?.reason };
         }),
@@ -535,8 +536,10 @@ export default function NewEnvelopePage() {
   }
 
   if (invitationLinks.length) {
-    const deliveryFailures = invitationLinks.filter((invite) => invite.delivered === false);
-    const deliveredCount = invitationLinks.filter((invite) => invite.delivered).length;
+    const activeInvitations = invitationLinks.filter((invite) => invite.active !== false);
+    const laterInvitations = invitationLinks.filter((invite) => invite.active === false);
+    const deliveryFailures = activeInvitations.filter((invite) => invite.delivered === false);
+    const deliveredCount = activeInvitations.filter((invite) => invite.delivered).length;
     return (
       <main className="envelope-shell">
         <section className="send-success">
@@ -544,8 +547,8 @@ export default function NewEnvelopePage() {
           <p className="eyebrow">ENVELOPPE ENVOYÉE</p>
           <h1>Votre document est en route.</h1>
           <p>{deliveryFailures.length
-            ? `${deliveredCount} e-mail${deliveredCount > 1 ? "s" : ""} envoyé${deliveredCount > 1 ? "s" : ""}. Les liens restent disponibles pour les destinataires dont l’envoi a échoué.`
-            : "Les invitations ont été envoyées par e-mail. Les liens privés restent disponibles ci-dessous."}</p>
+            ? `${deliveredCount} e-mail${deliveredCount > 1 ? "s" : ""} envoyé${deliveredCount > 1 ? "s" : ""} pour le premier groupe. Les liens restent disponibles pour les invitations non distribuées.`
+            : "L’enveloppe a été créée et les invitations du premier groupe sont prêtes."} {laterInvitations.length ? `${laterInvitations.length} destinataire${laterInvitations.length > 1 ? "s" : ""} recevront leur invitation après l’étape précédente.` : "Les liens privés restent disponibles ci-dessous."}</p>
           <div className="invitation-link-list">
             {invitationLinks.map((invite) => (
               <article key={invite.email}>
@@ -554,6 +557,7 @@ export default function NewEnvelopePage() {
                   <small>
                     {invite.email} ·{" "}
                     {invite.role === "APPROVER" ? "Approbateur" : "Signataire"}
+                    {invite.active === false ? " · Invitation après l’étape précédente" : ""}
                     {invite.delivered === true ? " · E-mail envoyé" : ""}
                     {invite.delivered === false ? " · E-mail non envoyé" : ""}
                   </small>

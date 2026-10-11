@@ -42,6 +42,8 @@ const labels: Record<string, string> = {
   EXPIRED: "Expirée",
   ENVELOPE_CREATED: "Enveloppe créée",
   ENVELOPE_SENT: "Invitations préparées",
+  ENVELOPE_VOIDED: "Enveloppe annulée",
+  ENVELOPE_EXPIRED: "Enveloppe expirée",
   DOCUMENT_SIGNED: "Document signé",
   ENVELOPE_APPROVED: "Enveloppe approuvée",
   COLLECTION_DOCUMENT_UPLOADED: "Pièce justificative reçue",
@@ -58,6 +60,7 @@ export default function EnvelopeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [item, setItem] = useState<Detail | null>(null);
   const [error, setError] = useState("");
+  const [actionInProgress, setActionInProgress] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("signeo_access_token");
@@ -71,6 +74,34 @@ export default function EnvelopeDetailPage() {
       .then(setItem)
       .catch((cause: Error) => setError(cause.message));
   }, [id]);
+
+  async function runAction(action: "cancel" | "remind", recipientId?: string) {
+    if (action === "cancel" && !window.confirm("Annuler cette enveloppe ? Les destinataires ne pourront plus la traiter.")) return;
+    const key = recipientId ?? action;
+    setActionInProgress(key);
+    setError("");
+    try {
+      const token = localStorage.getItem("signeo_access_token");
+      const path = action === "cancel"
+        ? `${API}/envelopes/${id}/cancel`
+        : `${API}/envelopes/${id}/recipients/${recipientId}/remind`;
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.message ?? "Cette action n’a pas pu être effectuée.");
+      const refreshed = await fetch(`${API}/envelopes/${id}`, {
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+      });
+      if (!refreshed.ok) throw new Error("L’action est terminée, mais le suivi n’a pas pu être actualisé.");
+      setItem(await refreshed.json());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Une erreur est survenue.");
+    } finally {
+      setActionInProgress("");
+    }
+  }
 
   async function downloadCollection(recipientId: string, file: CollectionFile) {
     const token = localStorage.getItem("signeo_access_token");
@@ -113,6 +144,10 @@ export default function EnvelopeDetailPage() {
     const anchor = document.createElement("a"); anchor.href = objectUrl; anchor.download = `dossier-de-preuve-${id}.zip`; anchor.click(); URL.revokeObjectURL(objectUrl);
   }
 
+  const nextSigningOrder = item
+    ? Math.min(...item.recipients.filter((recipient) => recipient.status === "WAITING").map((recipient) => recipient.signingOrder))
+    : Number.POSITIVE_INFINITY;
+
   return (
     <DashboardLayout
       title={item?.title ?? "Détail de l’enveloppe"}
@@ -127,6 +162,15 @@ export default function EnvelopeDetailPage() {
       ) : !item ? (
         <p className="envelope-loading">Chargement…</p>
       ) : (
+        <>
+        {["SENT", "PARTIALLY_SIGNED"].includes(item.status) && (
+          <div className="detail-workflow-actions">
+            <p>Vous pouvez relancer le prochain destinataire en attente ou annuler l’enveloppe.</p>
+            <button type="button" className="download-collected-file detail-cancel-action" disabled={Boolean(actionInProgress)} onClick={() => void runAction("cancel")}>
+              {actionInProgress === "cancel" ? "Annulation…" : "Annuler l’enveloppe"}
+            </button>
+          </div>
+        )}
         <div className="envelope-detail-grid">
           <section className="detail-card">
             <p className="eyebrow">DESTINATAIRES</p>
@@ -153,6 +197,11 @@ export default function EnvelopeDetailPage() {
                         ? "Refusé"
                     : recipient.viewedAt ? "Consulté" : "En attente"}
                 </em>
+                {["SENT", "PARTIALLY_SIGNED"].includes(item.status) && recipient.status === "WAITING" && recipient.signingOrder === nextSigningOrder && (
+                  <button type="button" className="download-collected-file" disabled={Boolean(actionInProgress)} onClick={() => void runAction("remind", recipient.id)}>
+                    {actionInProgress === recipient.id ? "Envoi…" : "Renvoyer un rappel"}
+                  </button>
+                )}
               </article>
             ))}
           </section>
@@ -214,6 +263,7 @@ export default function EnvelopeDetailPage() {
             ))}
           </section>
         </div>
+        </>
       )}
     </DashboardLayout>
   );

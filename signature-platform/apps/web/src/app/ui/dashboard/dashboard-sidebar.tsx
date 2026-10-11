@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { SigneoLogo } from "../signeo-logo";
 
@@ -28,6 +29,8 @@ const toolLinks = [
 ];
 
 export function DashboardSidebar({ userName, activeWorkspace, open, onClose, onLogout }: SidebarProps) {
+  const pathname = usePathname();
+  const isActive = (href: string) => pathname === href || (href !== "/dashboard" && pathname.startsWith(`${href}/`));
   const workspaceName = activeWorkspace?.name ?? userName ?? "Mon espace";
   const [logoutConfirmationOpen, setLogoutConfirmationOpen] = useState(false);
 
@@ -40,13 +43,13 @@ export function DashboardSidebar({ userName, activeWorkspace, open, onClose, onL
       </div>
       <nav className="dashboard-nav" aria-label="Navigation du tableau de bord">
         <p className="sidebar-label">ESPACE DE TRAVAIL</p>
-        {workspaceLinks.map((link) => <Link href={link.href} key={link.href} onClick={onClose}><span aria-hidden="true">{link.icon}</span>{link.label}</Link>)}
+        {workspaceLinks.map((link) => <Link href={link.href} key={link.href} aria-current={isActive(link.href) ? "page" : undefined} onClick={onClose}><span aria-hidden="true">{link.icon}</span>{link.label}</Link>)}
         <p className="sidebar-label sidebar-label-spaced">OUTILS</p>
-        {toolLinks.map((link) => <Link href={link.href} key={link.href} onClick={onClose}><span aria-hidden="true">{link.icon}</span>{link.label}</Link>)}
+        {toolLinks.map((link) => <Link href={link.href} key={link.href} aria-current={isActive(link.href) ? "page" : undefined} onClick={onClose}><span aria-hidden="true">{link.icon}</span>{link.label}</Link>)}
       </nav>
       <div className="sidebar-bottom">
-        <Link href="/dashboard/aide" onClick={onClose}><span aria-hidden="true">?</span>Aide</Link>
-        <Link href="/dashboard/parametres" onClick={onClose}><span aria-hidden="true">⚙</span>Paramètres</Link>
+        <Link href="/dashboard/aide" aria-current={isActive("/dashboard/aide") ? "page" : undefined} onClick={onClose}><span aria-hidden="true">?</span>Aide</Link>
+        <Link href="/dashboard/parametres" aria-current={isActive("/dashboard/parametres") ? "page" : undefined} onClick={onClose}><span aria-hidden="true">⚙</span>Paramètres</Link>
         <button type="button" onClick={() => setLogoutConfirmationOpen(true)}><span aria-hidden="true">↪</span>Se déconnecter</button>
       </div>
       {logoutConfirmationOpen && <div className="logout-dialog-backdrop" role="presentation" onMouseDown={() => setLogoutConfirmationOpen(false)}>

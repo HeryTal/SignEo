@@ -18,7 +18,10 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
-    "test:e2e": "vitest run --config ./vitest.config.e2e.ts"
+    "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
+    "migration:show": "typeorm migration:show -d dist/database/data-source.js",
+    "migration:run": "typeorm migration:run -d dist/database/data-source.js",
+    "test:integration": "npm run build && node test/workflow.integration.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.0",

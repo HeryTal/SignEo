@@ -6,17 +6,23 @@ import { SigneoMark } from "@/app/ui/signeo-logo";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 type Branding = { displayName: string; accentColor: string; logoUrl: string; textFont: "SANS" | "SERIF" | "MONO"; signatureFont: "SCRIPT" | "SERIF" | "SANS"; textColor: string; signatureColor: string; textSize: number; signatureSize: number };
+type IdentityVerification = { status: "NOT_STARTED" | "PENDING" | "VERIFIED" | "REJECTED"; provider: string | null; verifiedAt: string | null; rejectionReason: string | null };
+type Billing = { organization: { id: string; name: string }; billingEmail: string | null; plan: string; subscriptionStatus: string; usage: { envelopesThisMonth: number; includedEnvelopesPerMonth: number } };
 
 export default function SettingsPage() {
   const [branding, setBranding] = useState<Branding>({ displayName: "Signeo", accentColor: "#496b50", logoUrl: "", textFont: "SANS", signatureFont: "SCRIPT", textColor: "#24352b", signatureColor: "#315b45", textSize: 11, signatureSize: 22 });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [role, setRole] = useState("");
+  const [identity, setIdentity] = useState<IdentityVerification>({ status: "NOT_STARTED", provider: null, verifiedAt: null, rejectionReason: null });
+  const [billing, setBilling] = useState<Billing | null>(null);
+  const [billingEmail, setBillingEmail] = useState("");
   useEffect(() => {
     const token = localStorage.getItem("signeo_access_token");
     if (!token) return;
-    fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(async (response) => { if (response.ok) { const profile = await response.json(); if (profile.branding) setBranding(profile.branding); } })
+    Promise.all([fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } }), fetch(`${API}/billing`, { headers: { Authorization: `Bearer ${token}` } })])
+      .then(async ([profileResponse, billingResponse]) => { if (profileResponse.ok) { const profile = await profileResponse.json(); if (profile.branding) setBranding(profile.branding); if (profile.identityVerification) setIdentity(profile.identityVerification); setRole(profile.activeWorkspace?.role ?? ""); } if (billingResponse.ok) { const value = await billingResponse.json(); setBilling(value); setBillingEmail(value.billingEmail ?? ""); } })
       .catch(() => setNotice("Impossible de charger les paramètres. Vérifiez que l’API est démarrée."))
       .finally(() => setLoading(false));
   }, []);
@@ -29,6 +35,40 @@ export default function SettingsPage() {
       const result = await response.json().catch(() => null);
       if (!response.ok) throw new Error(result?.message ?? "La personnalisation n’a pas été enregistrée.");
       setNotice("Identité de marque enregistrée. Les prochaines enveloppes l’utiliseront.");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Erreur réseau."); }
+    finally { setBusy(false); }
+  }
+  async function startIdentityVerification() {
+    setBusy(true); setNotice("");
+    try {
+      const token = localStorage.getItem("signeo_access_token");
+      const response = await fetch(`${API}/auth/identity-verification`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.message ?? "La vérification n’a pas pu démarrer.");
+      setIdentity(result); setNotice(result.verificationUrl ? "Vérification créée. Ouvrez le parcours sécurisé du prestataire." : "Vérification en attente.");
+      if (result.verificationUrl) window.open(result.verificationUrl, "_blank", "noopener,noreferrer");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Erreur réseau."); }
+    finally { setBusy(false); }
+  }
+  async function saveBilling(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setNotice("");
+    try {
+      const token = localStorage.getItem("signeo_access_token");
+      const response = await fetch(`${API}/billing`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ billingEmail }) });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.message ?? "La facturation n’a pas pu être enregistrée.");
+      setBilling(result); setNotice("Adresse de facturation enregistrée.");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Erreur réseau."); }
+    finally { setBusy(false); }
+  }
+  async function billingAction(path: "checkout" | "portal", plan?: "BUSINESS" | "ENTERPRISE") {
+    setBusy(true); setNotice("");
+    try {
+      const token = localStorage.getItem("signeo_access_token");
+      const response = await fetch(`${API}/billing/${path}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: plan ? JSON.stringify({ plan }) : undefined });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.url) throw new Error(result?.message ?? "Le portail Stripe n’est pas disponible.");
+      window.location.assign(result.url);
     } catch (error) { setNotice(error instanceof Error ? error.message : "Erreur réseau."); }
     finally { setBusy(false); }
   }
@@ -64,6 +104,22 @@ export default function SettingsPage() {
         <button type="button" style={{ background: branding.accentColor }}>Consulter le document</button>
         <small>La couleur et le nom sont enregistrés dans PostgreSQL avec votre compte.</small>
       </section>
+      <section className="settings-card">
+        <p className="eyebrow">IDENTITÉ ET FACTURATION</p>
+        <h2>Vérification d’identité</h2>
+        <p>Statut : <b>{identity.status === "VERIFIED" ? "Vérifiée" : identity.status === "PENDING" ? "En attente" : identity.status === "REJECTED" ? "Refusée" : "Non démarrée"}</b></p>
+        {identity.rejectionReason && <p className="upload-error">{identity.rejectionReason}</p>}
+        {identity.status !== "VERIFIED" && <button type="button" className="secondary-action" onClick={() => void startIdentityVerification()} disabled={busy}>{identity.status === "PENDING" ? "Reprendre la vérification" : "Vérifier mon identité"}</button>}
+        {billing && <><h2 className="style-settings-title">Facturation · {billing.organization.name}</h2><p>Forfait <b>{billing.plan}</b> · {billing.usage.envelopesThisMonth}/{billing.usage.includedEnvelopesPerMonth} enveloppes ce mois.</p>{role === "ADMIN" ? <form onSubmit={saveBilling}><label className="form-field">E-mail de facturation<input required type="email" value={billingEmail} onChange={(event) => setBillingEmail(event.target.value)} /></label><button className="secondary-action" type="submit" disabled={busy}>Enregistrer la facturation</button></form> : <p className="workflow-hint">Seul un administrateur peut modifier la facturation.</p>}</>}
+      </section>
+      {billing && role === "ADMIN" && <section className="settings-card">
+        <p className="eyebrow">ABONNEMENT</p>
+        <h2>Stripe Billing</h2>
+        <p>Le paiement et la gestion de l’abonnement se font sur la page sécurisée de Stripe.</p>
+        <button type="button" className="secondary-action" disabled={busy} onClick={() => void billingAction("checkout", "BUSINESS")}>Choisir Business</button>
+        <button type="button" className="secondary-action" disabled={busy} onClick={() => void billingAction("checkout", "ENTERPRISE")}>Choisir Enterprise</button>
+        <button type="button" className="secondary-action" disabled={busy} onClick={() => void billingAction("portal")}>Gérer l’abonnement</button>
+      </section>}
     </div>
   </DashboardLayout>;
 }

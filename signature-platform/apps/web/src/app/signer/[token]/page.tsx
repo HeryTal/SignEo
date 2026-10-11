@@ -1,8 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { FormEvent, useEffect, useState, type CSSProperties } from "react";
+import { FormEvent, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useParams } from "next/navigation";
 import { SigneoLogo } from "../../ui/signeo-logo";
 
@@ -65,6 +66,11 @@ export default function SignerPage() {
   const { token } = useParams<{ token: string }>();
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [signatureName, setSignatureName] = useState("");
+  const [signatureMethod, setSignatureMethod] = useState<"TYPED" | "DRAWN">("TYPED");
+  const [drawnSignature, setDrawnSignature] = useState("");
+  const signatureCanvas = useRef<HTMLCanvasElement>(null);
+  const signatureDrawing = useRef(false);
+  const signatureHasInk = useRef(false);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [consent, setConsent] = useState(false);
   const [otpCode, setOtpCode] = useState("");
@@ -112,10 +118,16 @@ export default function SignerPage() {
     setBusy(true);
     setError("");
     try {
+      const completedValues = { ...fieldValues };
+      if (signatureMethod === "DRAWN" && drawnSignature) {
+        invitation?.documents.flatMap((document) => document.fields)
+          .filter((field) => field.type === "SIGNATURE")
+          .forEach((field) => { completedValues[field.id] = drawnSignature; });
+      }
       const response = await fetch(`${API}/envelopes/public/${token}/sign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signatureName, consent, fieldValues, otpCode }),
+        body: JSON.stringify({ signatureName, consent, fieldValues: completedValues, otpCode }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok)
@@ -128,6 +140,50 @@ export default function SignerPage() {
     } finally {
       setBusy(false);
     }
+  }
+  function startSignature(event: ReactPointerEvent<HTMLCanvasElement>) {
+    const canvas = event.currentTarget;
+    const bounds = canvas.getBoundingClientRect();
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    canvas.setPointerCapture(event.pointerId);
+    signatureDrawing.current = true;
+    signatureHasInk.current = true;
+    context.lineWidth = 3;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.strokeStyle = "#24352b";
+    context.beginPath();
+    const x = (event.clientX - bounds.left) * canvas.width / bounds.width;
+    const y = (event.clientY - bounds.top) * canvas.height / bounds.height;
+    context.arc(x, y, 1.5, 0, Math.PI * 2);
+    context.fill();
+    context.beginPath();
+    context.moveTo(x, y);
+  }
+  function continueSignature(event: ReactPointerEvent<HTMLCanvasElement>) {
+    if (!signatureDrawing.current) return;
+    const canvas = event.currentTarget;
+    const bounds = canvas.getBoundingClientRect();
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.lineTo(
+      (event.clientX - bounds.left) * canvas.width / bounds.width,
+      (event.clientY - bounds.top) * canvas.height / bounds.height,
+    );
+    context.stroke();
+  }
+  function finishSignature() {
+    if (!signatureDrawing.current) return;
+    signatureDrawing.current = false;
+    const canvas = signatureCanvas.current;
+    if (canvas && signatureHasInk.current) setDrawnSignature(canvas.toDataURL("image/png"));
+  }
+  function clearSignature() {
+    const canvas = signatureCanvas.current;
+    canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    signatureHasInk.current = false;
+    setDrawnSignature("");
   }
   async function requestOtp() {
     setBusy(true); setError("");
@@ -370,6 +426,12 @@ export default function SignerPage() {
                                   ))}
                                 </fieldset>
                               );
+                            if (field.type === "SIGNATURE" && signatureMethod === "DRAWN")
+                              return (
+                                <div key={field.id} className={inputClass + " signer-drawn-field"} style={style}>
+                                  {drawnSignature ? <Image src={drawnSignature} alt="Votre signature dessinée" width={600} height={150} unoptimized /> : "Signature dessinée à compléter"}
+                                </div>
+                              );
                             return (
                               <label
                                 key={field.id}
@@ -468,12 +530,36 @@ export default function SignerPage() {
                 />
               </label>
               {!isApprover && (
+                <>
+                <div className="signature-method-toggle" role="group" aria-label="Mode de signature">
+                  <button type="button" aria-pressed={signatureMethod === "TYPED"} onClick={() => setSignatureMethod("TYPED")}>Saisie</button>
+                  <button type="button" aria-pressed={signatureMethod === "DRAWN"} onClick={() => setSignatureMethod("DRAWN")}>Dessiner</button>
+                </div>
+                {signatureMethod === "DRAWN" && (
+                  <div className="signature-pad-wrap">
+                    <canvas
+                      ref={signatureCanvas}
+                      className="signature-pad"
+                      width={600}
+                      height={150}
+                      aria-label="Zone de dessin de votre signature"
+                      onPointerDown={startSignature}
+                      onPointerMove={continueSignature}
+                      onPointerUp={finishSignature}
+                      onPointerCancel={finishSignature}
+                    />
+                    <button type="button" className="secondary-action" onClick={clearSignature}>Effacer la signature</button>
+                  </div>
+                )}
                 <div className="signature-preview" style={(() => {
                   const signatureField = invitation.documents.flatMap((document) => document.fields).find((field) => field.type === "SIGNATURE");
                   return signatureField ? { color: signatureField.fontColor, fontSize: signatureField.fontSize, fontFamily: signatureField.fontFamily === "SCRIPT" || signatureField.fontFamily === "SERIF" ? "Georgia, serif" : "Arial, sans-serif", fontStyle: signatureField.fontFamily === "SCRIPT" ? "italic" : "normal" } : undefined;
                 })()}>
-                  {signatureName || "Votre nom"}
+                  {signatureMethod === "DRAWN" && drawnSignature
+                    ? <Image src={drawnSignature} alt="Aperçu de la signature dessinée" width={600} height={150} unoptimized />
+                    : signatureName || "Votre nom"}
                 </div>
+                </>
               )}
               {invitation.recipient.authenticationMethod === "EMAIL_OTP" && <div className="auth-notice"><b>Vérification par e-mail</b><p>Recevez un code à six chiffres sur {invitation.recipient.email}, puis saisissez-le avant de signer.</p>{otpSent ? <label className="form-field">Code reçu<input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={otpCode} onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, ""))} placeholder="123456" /></label> : <button type="button" className="secondary-action" disabled={busy} onClick={requestOtp}>Envoyer le code</button>}</div>}
               <label className="consent-check">
@@ -501,7 +587,7 @@ export default function SignerPage() {
               <button
                 className="envelope-next send-button"
                 style={{ background: "var(--brand-accent)" }}
-                disabled={busy || !consent}
+                disabled={busy || !consent || !signatureName.trim() || (!isApprover && signatureMethod === "DRAWN" && !drawnSignature)}
               >
                 {busy
                   ? "Enregistrement…"

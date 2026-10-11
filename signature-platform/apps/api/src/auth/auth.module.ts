@@ -8,10 +8,12 @@ import { JwtAuthGuard } from './jwt-auth.guard.js';
 import { WorkspacesModule } from '../workspaces/workspaces.module.js';
 import { GoogleOAuthService } from './google-oauth.service.js';
 import { AuthMailService } from './auth-mail.service.js';
+import { IdentityVerification } from '../users/identity-verification.entity.js';
+import { IdentityVerificationService } from '../users/identity-verification.service.js';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, IdentityVerification]),
     WorkspacesModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET ?? 'local-development-secret-change-me',
@@ -19,7 +21,7 @@ import { AuthMailService } from './auth-mail.service.js';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, GoogleOAuthService, AuthMailService, JwtAuthGuard],
+  providers: [AuthService, GoogleOAuthService, AuthMailService, IdentityVerificationService, JwtAuthGuard],
   exports: [JwtAuthGuard, JwtModule],
 })
 export class AuthModule {}

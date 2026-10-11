@@ -20,7 +20,9 @@ if (existsSync(environmentFile)) {
 const { AppModule } = await import('./app.module.js');
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // Stripe signs the exact request bytes sent to its webhook. Keeping them is
+  // required to validate its signature before parsing the event.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   app.enableCors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000' });
   app.enableShutdownHooks();
   await app.listen(process.env.PORT ?? 3001, process.env.HOST ?? '127.0.0.1');

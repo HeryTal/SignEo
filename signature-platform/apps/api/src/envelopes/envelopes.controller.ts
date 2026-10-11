@@ -83,6 +83,40 @@ export class EnvelopesController {
     return this.envelopes.list(request.user.sub);
   }
 
+  @Get('templates')
+  @UseGuards(JwtAuthGuard)
+  listTemplates(@Req() request: AuthenticatedRequest) {
+    return this.envelopes.listTemplates(request.user.sub);
+  }
+
+  @Post('envelopes/:id/templates')
+  @UseGuards(JwtAuthGuard)
+  createTemplate(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: { title?: string },
+  ) {
+    return this.envelopes.createTemplate(request.user.sub, id, body.title ?? '');
+  }
+
+  @Post('templates/:id/send')
+  @UseGuards(JwtAuthGuard)
+  sendFromTemplate(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: { recipients?: IncomingRecipient[] },
+  ) {
+    if (!Array.isArray(body.recipients)) {
+      throw new BadRequestException('Renseignez les destinataires du modèle.');
+    }
+    return this.envelopes.sendFromTemplate(
+      request.user.sub,
+      id,
+      body.recipients,
+      process.env.WEB_ORIGIN ?? 'http://localhost:3000',
+    );
+  }
+
   @Get('envelopes/activity')
   @UseGuards(JwtAuthGuard)
   activity(@Req() request: AuthenticatedRequest) {
@@ -219,6 +253,27 @@ export class EnvelopesController {
   send(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
     const webOrigin = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
     return this.envelopes.send(request.user.sub, id, webOrigin);
+  }
+
+  @Post('envelopes/:id/recipients/:recipientId/remind')
+  @UseGuards(JwtAuthGuard)
+  remind(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Param('recipientId') recipientId: string,
+  ) {
+    return this.envelopes.remind(
+      request.user.sub,
+      id,
+      recipientId,
+      process.env.WEB_ORIGIN ?? 'http://localhost:3000',
+    );
+  }
+
+  @Post('envelopes/:id/cancel')
+  @UseGuards(JwtAuthGuard)
+  cancel(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.envelopes.cancel(request.user.sub, id);
   }
 
   @Post('envelopes/public/:token/decline')
