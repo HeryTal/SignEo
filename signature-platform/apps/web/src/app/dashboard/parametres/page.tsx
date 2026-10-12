@@ -1,11 +1,65 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { CSSProperties, FormEvent, useEffect, useState } from "react";
 import { DashboardLayout } from "@/app/ui/dashboard/dashboard-layout";
 import styles from "./settings.module.css";
 import { SigneoMark } from "@/app/ui/signeo-logo";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const universes = [
+  {
+    name: "Botanique",
+    subtitle: "Naturel. Intemporel.",
+    accentColor: "#496b50",
+    textColor: "#24352b",
+    signatureColor: "#315b45",
+    textFont: "SANS",
+    signatureFont: "SCRIPT",
+    paper: "#e6eddd",
+    ink: "#294d38",
+    glyph: "B",
+    ornament: "✳",
+  },
+  {
+    name: "Éditorial",
+    subtitle: "Du fond. Du caractère.",
+    accentColor: "#873f33",
+    textColor: "#3e302a",
+    signatureColor: "#873f33",
+    textFont: "SERIF",
+    signatureFont: "SERIF",
+    paper: "#efe1cb",
+    ink: "#873f33",
+    glyph: "É",
+    ornament: "&",
+  },
+  {
+    name: "Studio",
+    subtitle: "Libre. Singulier.",
+    accentColor: "#575080",
+    textColor: "#343044",
+    signatureColor: "#575080",
+    textFont: "SANS",
+    signatureFont: "SANS",
+    paper: "#e5dff1",
+    ink: "#575080",
+    glyph: "S",
+    ornament: "✦",
+  },
+  {
+    name: "Monochrome",
+    subtitle: "L’essentiel, simplement.",
+    accentColor: "#242b2a",
+    textColor: "#242b2a",
+    signatureColor: "#242b2a",
+    textFont: "MONO",
+    signatureFont: "SANS",
+    paper: "#e6e7e2",
+    ink: "#242b2a",
+    glyph: "M",
+    ornament: "+",
+  },
+] as const;
 type Branding = {
   displayName: string;
   accentColor: string;
@@ -49,6 +103,16 @@ export default function SettingsPage() {
   const [preview, setPreview] = useState<"invitation" | "document">(
     "invitation",
   );
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (!expanded) return;
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExpanded(false);
+    };
+    window.addEventListener("keydown", dismiss);
+    return () => window.removeEventListener("keydown", dismiss);
+  }, [expanded]);
   const [savedBranding, setSavedBranding] = useState<Branding | null>(null);
   const [loadError, setLoadError] = useState(false);
   const dirty =
@@ -131,6 +195,7 @@ export default function SettingsPage() {
         throw new Error(
           result?.message ?? "La personnalisation n’a pas été enregistrée.",
         );
+      setSavedBranding({ ...branding });
       setNotice(
         "Identité de marque enregistrée. Les prochaines enveloppes l’utiliseront.",
       );
@@ -248,11 +313,90 @@ export default function SettingsPage() {
   }[identity.status];
   return (
     <DashboardLayout
-      title="Les détails font votre signature."
-      eyebrow="VOTRE ESPACE, À VOTRE IMAGE"
-      description="Une expérience qui vous ressemble, du premier regard à la dernière signature."
+      title="Paramètres"
+      eyebrow="VOTRE ESPACE DE TRAVAIL"
+      description="Les commandes de votre expérience Signeo."
     >
-      <div className={styles.settings}>
+      <div
+        className={styles.settings}
+        style={{ "--brand-accent": accent } as CSSProperties}
+      >
+        <header className={styles.hero}>
+          <div className={styles.heroCopy}>
+            <span className={styles.heroLabel}>
+              <span /> SIGNEO BRAND STUDIO <small>VOL. 01</small>
+            </span>
+            <h1>
+              Votre marque.
+              <br />
+              <em>Votre empreinte.</em>
+            </h1>
+            <p>
+              Transformez une simple invitation en une expérience
+              <br className={styles.desktopBreak} /> que l’on reconnaît au
+              premier regard.
+            </p>
+            <a
+              href="#brand-universes"
+              onClick={() => setSection("brand")}
+              className={styles.heroLink}
+            >
+              Composer mon univers <span>↗</span>
+            </a>
+          </div>
+          <div className={styles.heroArt} aria-hidden="true">
+            <div className={styles.orbit} />
+            <div className={styles.artNote}>
+              <span>UNE INVITATION À</span>
+              <strong>
+                faire
+                <br />
+                <i>impression.</i>
+              </strong>
+              <div />
+              <small>LA SIGNATURE DU DÉTAIL</small>
+            </div>
+            <div
+              className={styles.artBusiness}
+              style={{ background: accent, color: buttonInk }}
+            >
+              <span>VOTRE MARQUE, PARTOUT.</span>
+              <strong>
+                {branding.displayName || "Votre marque"}
+                <i>®</i>
+              </strong>
+              <div>
+                <span>
+                  Écrit avec soin.
+                  <br />
+                  Signé avec vous.
+                </span>
+                <span className={styles.artFlower}>✳</span>
+              </div>
+            </div>
+            <div className={styles.artStamp}>
+              VOTRE
+              <br />
+              <strong>signature</strong>
+              <br />
+              COMMENCE ICI ↗
+            </div>
+            <span className={styles.artCaption}>
+              01 — L’ART DE LA PREMIÈRE IMPRESSION
+            </span>
+          </div>
+          <div className={styles.heroFooter}>
+            <span>
+              <Icon name="brand" /> Une identité singulière
+            </span>
+            <span>
+              <Icon name="eye" /> Une expérience cohérente
+            </span>
+            <span>
+              <Icon name="shield" /> La confiance, dès le premier clic
+            </span>
+          </div>
+        </header>
         <nav className={styles.tabs} aria-label="Rubriques des paramètres">
           {(
             [
@@ -303,10 +447,91 @@ export default function SettingsPage() {
         )}
         {section === "brand" && (
           <>
+            <section id="brand-universes" className={styles.universes}>
+              <div className={styles.universeHeading}>
+                <div>
+                  <span className={styles.kicker}>
+                    01 / LA DIRECTION ARTISTIQUE
+                  </span>
+                  <h3>Quel est votre univers ?</h3>
+                </div>
+                <p>
+                  Un point de départ, pas une limite.
+                  <br />
+                  Choisissez une ambiance, ajustez chaque détail.
+                </p>
+              </div>
+              <div className={styles.universeGrid}>
+                {universes.map((universe, index) => {
+                  const active =
+                    branding.accentColor === universe.accentColor &&
+                    branding.textFont === universe.textFont &&
+                    branding.signatureFont === universe.signatureFont &&
+                    branding.textColor === universe.textColor &&
+                    branding.signatureColor === universe.signatureColor;
+                  return (
+                    <button
+                      type="button"
+                      key={universe.name}
+                      disabled={loading || busy || loadError}
+                      aria-pressed={active}
+                      className={styles.universeCard}
+                      style={
+                        {
+                          "--universe-paper": universe.paper,
+                          "--universe-ink": universe.ink,
+                        } as CSSProperties
+                      }
+                      onClick={() =>
+                        setBranding((current) => ({
+                          ...current,
+                          accentColor: universe.accentColor,
+                          textColor: universe.textColor,
+                          signatureColor: universe.signatureColor,
+                          textFont: universe.textFont,
+                          signatureFont: universe.signatureFont,
+                        }))
+                      }
+                    >
+                      <div className={styles.universeArt}>
+                        <span className={styles.universeNumber}>
+                          COLLECTION / 0{index + 1}
+                        </span>
+                        <strong
+                          style={{
+                            fontFamily:
+                              universe.textFont === "MONO"
+                                ? "monospace"
+                                : "var(--serif)",
+                          }}
+                        >
+                          {universe.glyph}
+                          <i>{universe.ornament}</i>
+                        </strong>
+                        <span className={styles.universeSwatches}>
+                          <i style={{ background: universe.ink }} />
+                          <i style={{ background: universe.paper }} />
+                          <i style={{ background: "#fffdf6" }} />
+                        </span>
+                        <span className={styles.universeCheck}>
+                          {active ? <Icon name="check" /> : "↗"}
+                        </span>
+                      </div>
+                      <div className={styles.universeName}>
+                        <b>{universe.name}</b>
+                        <small>{universe.subtitle}</small>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
             <div className={styles.intro}>
               <div>
-                <span className={styles.kicker}>LE STUDIO DE VOTRE MARQUE</span>
-                <h3>Faites bonne impression.</h3>
+                <span className={styles.kicker}>
+                  02 / LA TOUCHE PERSONNELLE
+                </span>
+                <h3>Maintenant, faites-en votre signature.</h3>
                 <p>
                   Quelques détails. Une expérience de signature à part entière.
                 </p>
@@ -553,12 +778,21 @@ export default function SettingsPage() {
                 </fieldset>
               </form>
               <aside
-                className={styles.previewColumn}
+                className={`${styles.previewColumn} ${expanded ? styles.expandedPreview : ""}`}
                 aria-label="Aperçu de votre personnalisation"
               >
                 <div className={styles.previewTop}>
-                  <span>DE LÇAUTRE CÔTÉ DE L’ÉCRAN</span>
-                  <Icon name="eye" />
+                  <span>LE RENDU FINAL</span>
+                  <button
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-label={
+                      expanded ? "Réduire l’aperçu" : "Agrandir l’aperçu"
+                    }
+                    onClick={() => setExpanded(!expanded)}
+                  >
+                    {expanded ? "Réduire ↙" : "Agrandir ↗"}
+                  </button>
                 </div>
                 <div
                   className={styles.previewSwitch}
@@ -580,7 +814,41 @@ export default function SettingsPage() {
                     Document
                   </button>
                 </div>
-                <div className={styles.previewStage}>
+                <div className={styles.deviceToolbar}>
+                  <div>
+                    <button
+                      type="button"
+                      aria-pressed={device === "desktop"}
+                      onClick={() => setDevice("desktop")}
+                    >
+                      Ordinateur
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={device === "mobile"}
+                      onClick={() => setDevice("mobile")}
+                    >
+                      Mobile
+                    </button>
+                  </div>
+                  <span>
+                    <i /> EN DIRECT
+                  </span>
+                </div>
+                <div
+                  className={`${styles.previewStage} ${device === "mobile" ? styles.mobilePreview : ""}`}
+                >
+                  <div className={styles.browserChrome}>
+                    <span>
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                    <small>
+                      <Icon name="shield" /> Aperçu de signature
+                    </small>
+                    <span>↗</span>
+                  </div>
                   <div
                     className={styles.previewPaper}
                     style={{ borderTopColor: accent }}
