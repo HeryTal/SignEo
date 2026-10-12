@@ -1,0 +1,4 @@
+import {LegalPage} from '../ui/legal-page';
+import {legalContent as content} from '../legal-content';
+export const metadata={title:'Mentions légales | Signeo',robots:{index:false,follow:true}};
+export default function Page(){return <LegalPage title="Mentions légales"><h2>Éditeur du service</h2><dl>{Object.entries({'Raison sociale':content.company.name,'Forme juridique':content.company.legalForm,'Siège social':content.company.address,'Immatriculation':content.company.registration,'Capital social':content.company.capital,'TVA':content.company.vat,'Direction de publication':content.company.publicationDirector,'Contact':content.company.email||'À renseigner','Téléphone':content.company.phone}).map(([label,value])=><div key={label}><dt><strong>{label}</strong></dt><dd style={{margin:'0 0 16px'}}>{value}</dd></div>)}</dl><h2>Hébergement</h2><p>{content.hosting.name}<br/>{content.hosting.address}<br/>{content.hosting.phone}</p></LegalPage>;}

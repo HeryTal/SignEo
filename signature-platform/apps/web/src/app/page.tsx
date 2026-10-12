@@ -178,7 +178,7 @@ export default function Home() {
           ["Puis-je connecter mon logiciel à Signeo ?", "Oui. L’API permet de consulter, créer et envoyer des enveloppes avec une clé API. L’espace Développeurs permet de créer les clés, choisir leurs permissions et configurer les webhooks."],
         ].map(([q, a]) => <details key={q}><summary>{q}<span aria-hidden="true">+</span></summary><p>{a}</p></details>)}</div></section>
       </main>
-      <footer className="footer wrap"><div className="footer-top"><a className="brand" href="#"><SigneoLogo /></a><p>Un petit geste.<br />De nouveaux possibles.</p><a href="#fonctionnement">Découvrir l’expérience <Arrow /></a></div><div className="footer-bottom"><span>© {new Date().getFullYear()} Signeo.it · Plateforme en développement</span><a href="#questions">Une question ?</a><span>Imaginé pour vous faire avancer.</span></div></footer>
+      <footer className="footer wrap"><div className="footer-top"><a className="brand" href="#"><SigneoLogo /></a><p>Un petit geste.<br />De nouveaux possibles.</p><a href="#fonctionnement">Découvrir l’expérience <Arrow /></a></div><div className="footer-bottom"><span>© {new Date().getFullYear()} Signeo.it · Plateforme en développement</span><a href="#questions">Une question ?</a><a href="/mentions-legales">Mentions légales</a><a href="/confidentialite">Confidentialité</a><a href="/conditions">Conditions</a></div></footer>
     </>
   );
 }

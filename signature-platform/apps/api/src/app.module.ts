@@ -1,3 +1,6 @@
+import { validateProductionEnvironment } from './config/production.js';
+import { HealthController } from './health.controller.js';
+import { ContactsModule } from './contacts/contacts.module.js';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -8,6 +11,8 @@ import { EnvelopesModule } from './envelopes/envelopes.module.js';
 import { WorkspacesModule } from './workspaces/workspaces.module.js';
 import { DeveloperModule } from './developer/developer.module.js';
 import { BillingModule } from './billing/billing.module.js';
+
+validateProductionEnvironment();
 
 @Module({
   imports: [
@@ -21,16 +26,17 @@ import { BillingModule } from './billing/billing.module.js';
       database: process.env.DATABASE_NAME ?? 'signeo',
       schema: process.env.DATABASE_SCHEMA ?? 'public',
       autoLoadEntities: true,
-      synchronize: process.env.NODE_ENV !== 'production',
-      ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
+      synchronize: process.env.NODE_ENV !== 'production' && process.env.DATABASE_SYNCHRONIZE !== 'false',
+      ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: true } : false,
     }),
+    ContactsModule,
     AuthModule,
     WorkspacesModule,
     DeveloperModule,
     BillingModule,
     EnvelopesModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController,HealthController],
   providers: [AppService],
 })
 export class AppModule {}

@@ -24,7 +24,7 @@ export class EnvelopeTemplate {
   recipients!: TemplateRecipient[];
   @Column({ name: 'collection_requests', type: 'jsonb', default: [] })
   collectionRequests!: Record<string, unknown>[];
-  @Column({ name: 'preparation_settings', type: 'jsonb', default: () => "'{}'::jsonb" })
+  @Column({ name: 'preparation_settings', type: 'jsonb', default: {} })
   preparationSettings!: {
     signingMode?: 'SIMULTANEOUS' | 'SEQUENTIAL' | 'CUSTOM';
     documentOrder?: string[];

@@ -1,5 +1,6 @@
 "use client";
 
+import { InvitationContent, brandStyles, type Brand } from "../../ui/branded-invitation";
 import Image from "next/image";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -48,7 +49,7 @@ type Invitation = {
     allowDecline: boolean;
     expiresAt: string | null;
     signatureLevel: string;
-    branding: { displayName: string; accentColor: string; logoUrl: string };
+    branding: Brand;
     cryptographicPdfEnabled: boolean;
   };
   documents: {
@@ -63,6 +64,7 @@ type Invitation = {
 };
 
 export default function SignerPage() {
+  const [opened,setOpened]=useState(false);
   const { token } = useParams<{ token: string }>();
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [signatureName, setSignatureName] = useState("");
@@ -246,10 +248,10 @@ export default function SignerPage() {
   }
   const isApprover = invitation?.recipient.role === "APPROVER";
   return (
-    <main className="signer-shell" style={{ ["--brand-accent" as string]: invitation?.envelope.branding?.accentColor || "#496b50" } as CSSProperties}>
+    <main className="signer-shell" style={brandStyles(invitation?.envelope.branding??{})}>
       <header className="signer-header" style={{ borderBottomColor: invitation?.envelope.branding?.accentColor || undefined }}>
         <Link href="/" className="brand">
-          {invitation?.envelope.branding?.logoUrl ? <><img className="signer-logo" src={invitation.envelope.branding.logoUrl} alt="" />{invitation.envelope.branding.displayName || "Signeo.it"}</> : <SigneoLogo />}
+          {invitation?.envelope.branding?.logoUrl ? <><img className="signer-logo" src={invitation.envelope.branding.logoUrl} alt="" />{invitation.envelope.branding.displayName || "Signeo.it"}</> : <><SigneoLogo />{invitation?.envelope.branding?.displayName && invitation.envelope.branding.displayName !== "Signeo" && <span>{invitation.envelope.branding.displayName}</span>}</>}
         </Link>
         <span>
           {isApprover ? "Approbation sécurisée" : "Signature sécurisée"}
@@ -284,6 +286,8 @@ export default function SignerPage() {
             Le créateur de l’enveloppe retrouvera ce refus dans son historique.
           </p>
         </section>
+      ) : !opened && invitation ? (
+        <section className="signer-welcome"><InvitationContent brand={invitation.envelope.branding??{}} recipient={invitation.recipient.name} title={invitation.envelope.title} message={invitation.envelope.message} approver={isApprover} onContinue={()=>setOpened(true)} /></section>
       ) : (
         invitation && (
           <>
@@ -586,7 +590,7 @@ export default function SignerPage() {
               )}
               <button
                 className="envelope-next send-button"
-                style={{ background: "var(--brand-accent)" }}
+                style={{ background: "var(--brand-accent)", color: "var(--brand-button-ink)" }}
                 disabled={busy || !consent || !signatureName.trim() || (!isApprover && signatureMethod === "DRAWN" && !drawnSignature)}
               >
                 {busy

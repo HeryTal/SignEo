@@ -333,6 +333,7 @@ export class EnvelopesService {
           documentOrder: documentEntities.map((document) => document.storageName),
         },
         brandSnapshot: {
+          ...owner.branding,
           displayName: owner.branding?.displayName?.trim() || 'Signeo',
           accentColor: /^#[\da-f]{6}$/i.test(owner.branding?.accentColor ?? '') ? owner.branding.accentColor : '#496b50',
           logoUrl: owner.branding?.logoUrl ?? '',
@@ -399,8 +400,9 @@ export class EnvelopesService {
           }),
         ),
       });
-      await this.envelopes.save(envelope);
-      await this.events.save(
+      await this.dataSource.transaction(async manager => {
+      await manager.save(Envelope,envelope);
+      await manager.save(AuditEvent,
         this.events.create({
           envelope,
           actor: owner,
@@ -412,9 +414,9 @@ export class EnvelopesService {
           },
         }),
       );
-      const response = this.toDto(envelope);
-      void this.webhooks.dispatch(membership.workspace.id, 'envelope.created', { envelopeId: envelope.id, title: envelope.title, status: envelope.status, environment: envelope.apiEnvironment });
-      return response;
+      await this.webhooks.dispatch(membership.workspace.id, 'envelope.created', { envelopeId: envelope.id, title: envelope.title, status: envelope.status, environment: envelope.apiEnvironment },manager);
+      });
+      return this.toDto(envelope);
     } catch (error) {
       const { unlink } = await import('node:fs/promises');
       await Promise.all(
@@ -755,6 +757,7 @@ export class EnvelopesService {
         action: 'ENVELOPE_SENT',
         details: {},
       });
+      await this.webhooks.dispatch(membership.workspace.id, 'envelope.sent', { envelopeId:id,title:envelope.title,status:envelope.status,environment:envelope.apiEnvironment },manager);
       return {
         envelope: this.toDto(envelope),
         invitations: envelope.recipients.map((recipient) => ({
@@ -770,7 +773,7 @@ export class EnvelopesService {
     });
     const firstOrder = Math.min(...result.invitations.map((invite) => invite.signingOrder));
     const deliveries = await Promise.all(result.invitations.filter((invite) => invite.signingOrder === firstOrder).map(async (invite) => {
-      try { return { id: invite.id, email: invite.email, ...(await this.mail.sendInvitation({ to: invite.email, recipientName: invite.name, signingUrl: invite.signingUrl, envelopeTitle: result.envelope.title, expiresAt: result.envelope.expiresAt })) }; }
+      try { return { id: invite.id, email: invite.email, ...(await this.mail.sendInvitation({ to: invite.email, recipientName: invite.name, signingUrl: invite.signingUrl, envelopeTitle: result.envelope.title, expiresAt: result.envelope.expiresAt, branding: result.envelope.brandSnapshot })) }; }
       catch (error) { return { id: invite.id, email: invite.email, delivered: false, reason: error instanceof Error ? error.message : 'EMAIL_FAILED' }; }
     }));
     await Promise.all(deliveries.map((delivery) => this.events.save(this.events.create({
@@ -781,7 +784,6 @@ export class EnvelopesService {
       details: delivery.delivered ? {} : { reason: delivery.reason },
     }))));
     await Promise.all(deliveries.filter((delivery) => delivery.delivered).map((delivery) => this.recipients.update(delivery.id, { lastRemindedAt: new Date() })));
-    void this.webhooks.dispatch(membership.workspace.id, 'envelope.sent', { envelopeId: id, title: result.envelope.title, status: 'SENT', environment: result.envelope.apiEnvironment });
     return { ...result, deliveries };
   }
 
@@ -817,6 +819,7 @@ export class EnvelopesService {
       envelopeTitle: recipient.envelope.title,
       signingUrl: `${webOrigin}/signer/${recipient.accessToken}`,
       expiresAt: recipient.envelope.expiresAt,
+      branding: recipient.envelope.brandSnapshot,
     });
     if (!delivery.delivered) {
       throw new BadRequestException('Le service e-mail n’est pas configuré pour envoyer les rappels.');
@@ -1270,6 +1273,7 @@ export class EnvelopesService {
           fieldValues: completedFieldValues,
         },
       });
+      if (allCompleted && recipient.envelope.workspace) await this.webhooks.dispatch(recipient.envelope.workspace.id,'envelope.completed',{envelopeId:recipient.envelope.id,title:recipient.envelope.title,status:recipient.envelope.status,environment:recipient.envelope.apiEnvironment},manager);
       return {
         status: recipient.envelope.status,
         signedAt: recipient.signedAt,
@@ -1284,7 +1288,6 @@ export class EnvelopesService {
       if (completedEnvelope) {
         try { await this.createCompletedPdfs(completedEnvelope); }
         catch (error) { console.error('PDF final generation failed:', error instanceof Error ? error.message : 'Unknown error'); }
-        if (completedEnvelope.workspace) void this.webhooks.dispatch(completedEnvelope.workspace.id, 'envelope.completed', { envelopeId: completedEnvelope.id, title: completedEnvelope.title, status: completedEnvelope.status, environment: completedEnvelope.apiEnvironment });
         try {
           const delivery = await this.mail.sendCompletionNotice(completedEnvelope.owner.email, completedEnvelope.title);
           await this.events.save(this.events.create({ envelope: completedEnvelope, actor: null, actorEmail: completedEnvelope.owner.email, action: delivery.delivered ? 'COMPLETION_EMAIL_SENT' : 'COMPLETION_EMAIL_PENDING', details: delivery.delivered ? {} : { reason: delivery.reason } }));
@@ -1310,6 +1313,7 @@ export class EnvelopesService {
                 envelopeTitle: pendingEnvelope.title,
                 signingUrl: `${webOrigin}/signer/${nextRecipient.accessToken}`,
                 expiresAt: pendingEnvelope.expiresAt,
+                branding: pendingEnvelope.brandSnapshot,
               });
               if (!delivery.delivered) continue;
               nextRecipient.lastRemindedAt = new Date();
@@ -1418,6 +1422,7 @@ export class EnvelopesService {
       createdAt: envelope.createdAt,
       expiresAt: envelope.expiresAt,
       preparationSettings: envelope.preparationSettings,
+      brandSnapshot: envelope.brandSnapshot,
       cryptographicPdfEnabled: Boolean(process.env.SIGNING_P12_PATH && process.env.SIGNING_P12_PASSWORD),
       documents: this.orderedDocuments(envelope).map((document) => ({
         id: document.id,
@@ -1654,7 +1659,7 @@ export class EnvelopesService {
       if (previousRecipients.some((item) => !['SIGNED', 'APPROVED'].includes(item.status))) continue;
       const origin = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
       try {
-        const delivery = await this.mail.sendReminder({ to: recipient.email, recipientName: recipient.name, envelopeTitle: recipient.envelope.title, signingUrl: `${origin}/signer/${recipient.accessToken}`, expiresAt: recipient.envelope.expiresAt });
+        const delivery = await this.mail.sendReminder({ to: recipient.email, recipientName: recipient.name, envelopeTitle: recipient.envelope.title, signingUrl: `${origin}/signer/${recipient.accessToken}`, expiresAt: recipient.envelope.expiresAt, branding: recipient.envelope.brandSnapshot });
         if (!delivery.delivered) continue;
         recipient.lastRemindedAt = new Date();
         await this.recipients.update(recipient.id, { lastRemindedAt: recipient.lastRemindedAt });

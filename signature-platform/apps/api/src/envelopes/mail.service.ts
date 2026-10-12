@@ -1,7 +1,9 @@
+import { invitationHtml } from './brand-mail.js';
+import type { UserBranding } from '../users/user.entity.js';
 import { Injectable, Logger } from '@nestjs/common';
 import nodemailer from 'nodemailer';
 
-type InvitationMail = { to: string; recipientName: string; envelopeTitle: string; signingUrl: string; expiresAt?: Date | null };
+type InvitationMail = { branding?: Partial<UserBranding>; to: string; recipientName: string; envelopeTitle: string; signingUrl: string; expiresAt?: Date | null };
 
 @Injectable()
 export class MailService {
@@ -25,6 +27,7 @@ export class MailService {
     await transport.sendMail({
       from: process.env.SMTP_FROM,
       to: mail.to,
+      html: invitationHtml(mail),
       subject: `Signature demandée — ${mail.envelopeTitle}`,
       text: `Bonjour ${mail.recipientName},\n\nVous êtes invité(e) à consulter et signer « ${mail.envelopeTitle} ».\n\nOuvrir le dossier : ${mail.signingUrl}${mail.expiresAt ? `\n\nExpiration : ${mail.expiresAt.toLocaleDateString('fr-FR')}` : ''}`,
     });
@@ -41,7 +44,7 @@ export class MailService {
   async sendReminder(mail: InvitationMail) {
     if (!this.configured) return { delivered: false, reason: 'SMTP_NOT_CONFIGURED' as const };
     const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT ?? 587), secure: process.env.SMTP_SECURE === 'true', auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } : undefined });
-    await transport.sendMail({ from: process.env.SMTP_FROM, to: mail.to, subject: `Rappel de signature — ${mail.envelopeTitle}`, text: `Bonjour ${mail.recipientName},\n\nLe document « ${mail.envelopeTitle} » attend toujours votre action.\n\nOuvrir le dossier : ${mail.signingUrl}${mail.expiresAt ? `\n\nExpiration : ${mail.expiresAt.toLocaleDateString('fr-FR')}` : ''}` });
+    await transport.sendMail({ from: process.env.SMTP_FROM, to: mail.to, html: invitationHtml({...mail,reminder:true}), subject: `Rappel de signature — ${mail.envelopeTitle}`, text: `Bonjour ${mail.recipientName},\n\nLe document « ${mail.envelopeTitle} » attend toujours votre action.\n\nOuvrir le dossier : ${mail.signingUrl}${mail.expiresAt ? `\n\nExpiration : ${mail.expiresAt.toLocaleDateString('fr-FR')}` : ''}` });
     return { delivered: true };
   }
 

@@ -11,7 +11,7 @@ export class ApiKey {
   @Column({ length: 16 }) environment!: ApiKeyEnvironment;
   @Column({ length: 24 }) prefix!: string;
   @Column({ name: 'secret_hash', length: 64, unique: true }) secretHash!: string;
-  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" }) scopes!: string[];
+  @Column({ type: 'jsonb', default: [] }) scopes!: string[];
   @Column({ name: 'last_used_at', type: 'timestamptz', nullable: true }) lastUsedAt!: Date | null;
   @Column({ name: 'revoked_at', type: 'timestamptz', nullable: true }) revokedAt!: Date | null;
   @ManyToOne(() => Workspace, { onDelete: 'CASCADE' }) workspace!: Relation<Workspace>;

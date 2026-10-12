@@ -1054,3 +1054,4 @@
 .signer-radio legend {
   padding: 0 4px;
 }
+.signer-welcome{width:min(460px,calc(100% - 32px));margin:45px auto;padding:32px;background:#fff;border:1px solid #dce4d4;border-top:4px solid var(--brand-accent);border-radius:12px;box-shadow:0 14px 50px #213d2210}.signer-intro{font-family:var(--brand-font);color:var(--brand-text)}.signer-shell input[type=checkbox],.signer-shell input[type=radio]{accent-color:var(--brand-accent)}@media(max-width:500px){.signer-welcome{margin:25px auto;padding:24px}}

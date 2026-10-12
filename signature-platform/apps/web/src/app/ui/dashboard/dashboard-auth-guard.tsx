@@ -49,9 +49,12 @@ export function DashboardAuthGuard({ children }: { children: ReactNode }) {
       if (event.persisted) { setUser(null); void checkSession(); }
     };
     window.addEventListener("pageshow", onPageShow);
+    const refresh = () => void checkSession();
+    window.addEventListener('signeo-profile-updated',refresh);
     return () => {
       window.clearTimeout(timer);
       window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("signeo-profile-updated",refresh);
     };
   }, [checkSession]);
 

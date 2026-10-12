@@ -23,6 +23,9 @@ export class User {
   @Column({ unique: true, length: 255 })
   email!: string;
 
+  @Column({ name: 'auth_version', default: 0 })
+  authVersion!: number;
+
   @Column({ name: 'password_hash' })
   passwordHash!: string;
 
@@ -35,7 +38,7 @@ export class User {
   @Column({ name: 'active_workspace_id', type: 'uuid', nullable: true })
   activeWorkspaceId!: string | null;
 
-  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  @Column({ type: 'jsonb', default: {} })
   branding!: UserBranding;
 
   @CreateDateColumn({ name: 'created_at' })

@@ -18,7 +18,7 @@ type SidebarProps = {
 const workspaceLinks = [
   { icon: "⌂", label: "Vue d’ensemble", href: "/dashboard" },
   { icon: "▤", label: "Documents", href: "/dashboard/documents" },
-  { icon: "✎", label: "Signatures", href: "/dashboard/enveloppes" },
+  { icon: "✎", label: "Signatures", href: "/dashboard/signatures" },
   { icon: "◌", label: "Modèles", href: "/dashboard/modeles" },
   { icon: "♧", label: "Équipe", href: "/dashboard/equipe" },
 ];

@@ -1,3 +1,4 @@
+import { validateProductionEnvironment } from './config/production.js';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { config as loadEnvironment } from 'dotenv';
@@ -12,11 +13,12 @@ const environmentFile = existsSync(rootEnvironmentFile)
 if (existsSync(environmentFile)) {
   // In local development, the repository .env is the source of truth even
   // when PowerShell already has an older DATABASE_PASSWORD in its environment.
-  loadEnvironment({ path: environmentFile, override: true });
+  loadEnvironment({ path: environmentFile, override: process.env.NODE_ENV !== 'production' });
 }
 
 // Load AppModule only after dotenv has populated process.env. Static imports
 // are evaluated before this file's code runs.
+validateProductionEnvironment();
 const { AppModule } = await import('./app.module.js');
 
 async function bootstrap() {
@@ -24,6 +26,15 @@ async function bootstrap() {
   // required to validate its signature before parsing the event.
   const app = await NestFactory.create(AppModule, { rawBody: true });
   app.enableCors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000' });
+  const server = app.getHttpAdapter().getInstance();
+  if (process.env.TRUST_PROXY_HOPS) server.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS));
+  server.disable('x-powered-by');
+  app.use((_request: unknown, response: {setHeader:(key:string,value:string)=>void}, next:()=>void) => {
+    response.setHeader('X-Content-Type-Options','nosniff');
+    response.setHeader('Referrer-Policy','no-referrer');
+    response.setHeader('Cache-Control','no-store');
+    next();
+  });
   app.enableShutdownHooks();
   await app.listen(process.env.PORT ?? 3001, process.env.HOST ?? '127.0.0.1');
 }

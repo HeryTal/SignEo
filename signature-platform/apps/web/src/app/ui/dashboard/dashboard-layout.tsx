@@ -1,5 +1,6 @@
 "use client";
 
+import { apiRequest } from "../api-client";
 import { ReactNode, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DashboardSidebar } from "./dashboard-sidebar";
@@ -14,7 +15,11 @@ export function DashboardLayout({ children, title, description, eyebrow = "ESPAC
   const user = useDashboardUser();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [subscriptionOpen, setSubscriptionOpen] = useState(false);
-  function logout() { localStorage.removeItem("signeo_access_token"); localStorage.removeItem("signeo_user"); router.replace("/connexion"); }
+  async function logout() {
+    try { await apiRequest('/auth/logout',{method:'POST'}); }
+    catch { /* Always clear local credentials even when the network is unavailable. */ }
+    localStorage.removeItem("signeo_access_token"); localStorage.removeItem("signeo_user"); router.replace("/connexion");
+  }
   return <main className="dashboard-shell dashboard-layout">
     <button className="dashboard-menu-toggle" type="button" onClick={() => setSidebarOpen(!sidebarOpen)} aria-expanded={sidebarOpen}>☰ <span>Menu</span></button>
     <DashboardSidebar userName={user.name} activeWorkspace={user.activeWorkspace} workspaces={user.workspaces} open={sidebarOpen} onClose={() => setSidebarOpen(false)} onLogout={logout} onOpenSubscription={() => { setSidebarOpen(false); setSubscriptionOpen(true); }} />

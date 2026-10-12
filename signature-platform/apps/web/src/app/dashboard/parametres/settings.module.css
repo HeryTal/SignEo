@@ -2070,3 +2070,4 @@
     animation: none !important;
   }
 }
+.sessionRow{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 0;border-bottom:1px solid #e3e8dc}.sessionRow:last-of-type{margin-bottom:20px}.sessionRow>div{min-width:0}.sessionRow b{font-size:12px;overflow-wrap:anywhere}.sessionRow small{display:block;font-size:10px;line-height:1.7;color:#72806b;overflow-wrap:anywhere}.field textarea{width:100%;padding:12px;border:1px solid #dfe5db;border-radius:7px;font:12px var(--sans);resize:vertical}.tabs{overflow-x:auto}.sessionRow>div:last-child{display:flex;flex-wrap:wrap;gap:8px}.sessionRow button{font-size:9px}@media(max-width:580px){.sessionRow{align-items:flex-start;flex-direction:column}}

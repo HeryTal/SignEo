@@ -168,7 +168,7 @@ export default function AuthPage({ mode }: AuthPageProps) {
               <div className="auth-label-row"><label htmlFor="password">Mot de passe</label>{!isSignup && <button className="auth-text-button" type="button" onClick={() => { setError(""); setResetNotice(""); setResetRequested(true); }}>Mot de passe oublié ?</button>}</div>
               <div className="auth-password"><input id="password" name="password" type={showPassword ? "text" : "password"} autoComplete={isSignup ? "new-password" : "current-password"} minLength={8} placeholder="8 caractères minimum" required /><button type="button" className="auth-reveal" aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"} onClick={() => setShowPassword(!showPassword)}>{showPassword ? "Masquer" : "Afficher"}</button></div>
             </div>
-            {isSignup && <label className="auth-consent"><input type="checkbox" required /><span>J’accepte les conditions d’utilisation et la politique de confidentialité.</span></label>}
+            {isSignup && <label className="auth-consent"><input type="checkbox" required /><span>J’accepte les <a href="/conditions" target="_blank" rel="noreferrer">conditions d’utilisation</a> et la <a href="/confidentialite" target="_blank" rel="noreferrer">politique de confidentialité</a>.</span></label>}
             {!isSignup && <label className="auth-consent"><input type="checkbox" /><span>Garder ma session ouverte</span></label>}
             <button className="button auth-submit" type="submit" disabled={loading}>{loading ? "Connexion…" : isSignup ? "Créer mon espace" : "Se connecter"}<span aria-hidden="true">↗</span></button>
           </form></>}

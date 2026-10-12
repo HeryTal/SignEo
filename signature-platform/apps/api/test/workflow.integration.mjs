@@ -10,12 +10,16 @@ import { DataSource } from 'typeorm';
 import { Test } from '@nestjs/testing';
 import { PDFDocument } from 'pdf-lib';
 
-config({ path: '../../.env', quiet: true });
+config({ path: '../../.env', override: true, quiet: true });
 const schema = `workflow_test_${randomUUID().replaceAll('-', '')}`;
 const directory = await mkdtemp(join(tmpdir(), 'signeo-workflow-'));
 process.env.DATABASE_SCHEMA = schema;
 process.env.UPLOAD_DIRECTORY = directory;
 process.env.NODE_ENV = 'test';
+process.env.DATABASE_SYNCHRONIZE = 'false';
+// Never contact configured external services in the default integration suite.
+if (process.env.RUN_STRIPE_BILLING_TEST !== '1') delete process.env.STRIPE_SECRET_KEY;
+delete process.env.REDIS_URL;
 process.env.IDENTITY_VERIFICATION_PROVIDER = 'test-provider';
 process.env.IDENTITY_VERIFICATION_URL = 'https://verify.example.test/session';
 process.env.IDENTITY_VERIFICATION_WEBHOOK_SECRET = 'test-identity-callback-secret';
@@ -25,6 +29,15 @@ await bootstrap.initialize();
 await bootstrap.query(`CREATE SCHEMA "${schema}"`);
 let app;
 try {
+  const migrations = new DataSource({ ...migrationSource.options, schema });
+  await migrations.initialize();
+  const applied = await migrations.runMigrations();
+  assert.equal(applied.length, 4);
+  assert.equal((await migrations.runMigrations()).length,0);
+  const schemaDiff=await migrations.driver.createSchemaBuilder().log();
+  assert.equal(schemaDiff.upQueries.length,0,'Frozen migrations must match entity schema: '+schemaDiff.upQueries.map(q=>q.query).join('; '));
+  await migrations.destroy();
+  console.log('PASS fresh database: all migrations without synchronize, no schema drift, repeat safe');
   const { AppModule } = await import('../dist/app.module.js');
   const { MailService } = await import('../dist/envelopes/mail.service.js');
   const { WebhooksService } = await import('../dist/webhooks/webhooks.service.js');
@@ -43,23 +56,6 @@ try {
   const base = await app.getUrl();
   const db = app.get(DataSource);
   const service = app.get(EnvelopesService);
-
-  // Exercise the real migration on a database with the pre-existing application tables.
-  const runner = db.createQueryRunner();
-  await runner.dropTable(`${schema}.envelope_templates`);
-  const migrations = new DataSource({ ...migrationSource.options, schema });
-  await migrations.initialize();
-  const applied = await migrations.runMigrations();
-  assert.equal(applied.length, 2);
-  assert.equal((await migrations.runMigrations()).length, 0);
-  const table = await runner.getTable(`${schema}.envelope_templates`);
-  assert.equal(table.foreignKeys.length, 2);
-  assert.equal(table.columns.length, 13);
-  assert.ok(await runner.getTable(`${schema}.organizations`));
-  assert.ok(await runner.getTable(`${schema}.identity_verifications`));
-  await migrations.destroy();
-  await runner.release();
-  console.log('PASS migration: table, foreign keys, defaults and second run');
 
   async function request(path, body, accessToken, extraHeaders = {}, method = body === undefined ? 'GET' : 'POST') {
     const response = await fetch(`${base}${path}`, {
@@ -235,6 +231,30 @@ try {
       if (customer) await stripe(`customers/${customer}`, 'DELETE');
     }
   }
+
+  // HTTP authorization: contacts never cross workspace boundaries.
+  const savedContact=await request('/contacts',{name:'Camille',email:'CAMILLE@example.test',company:'Test'},token);
+  assert.equal(savedContact.email,'camille@example.test');
+  const other=await request('/auth/signup',{name:'Other workspace',email:`other-${randomUUID()}@example.test`,password});
+  assert.equal((await request('/contacts',undefined,other.accessToken)).items.length,0);
+  assert.equal((await fetch(`${base}/contacts/${savedContact.id}`,{method:'DELETE',headers:{Authorization:`Bearer ${other.accessToken}`}})).status,404);
+  await request('/contacts/'+savedContact.id,{name:'Camille updated',email:'camille@example.test'},token,{},'PATCH');
+  await request('/contacts/'+savedContact.id,undefined,token,{},'DELETE');
+  console.log('PASS contacts: CRUD, normalization and cross-workspace isolation');
+
+  // A password change revokes every session, including signed tokens already issued.
+  const secondSession=await request('/auth/login',{email,password});
+  const sessions=await request('/auth/sessions',undefined,secondSession.accessToken);
+  assert.ok(sessions.length>=2);
+  await request('/auth/sessions/revoke-others',{},secondSession.accessToken);
+  assert.equal((await fetch(base+'/auth/me',{headers:{Authorization:'Bearer '+token}})).status,401);
+  const newPassword='Updated-'+randomUUID();
+  await request('/auth/password',{currentPassword:password,password:newPassword},secondSession.accessToken);
+  assert.equal((await fetch(base+'/auth/me',{headers:{Authorization:'Bearer '+secondSession.accessToken}})).status,401);
+  const finalSession=await request('/auth/login',{email,password:newPassword});
+  await request('/auth/logout',{},finalSession.accessToken);
+  assert.equal((await fetch(base+'/auth/me',{headers:{Authorization:'Bearer '+finalSession.accessToken}})).status,401);
+  console.log('PASS sessions: revoke others, password change invalidation and server-side logout');
 
   if (process.env.SMTP_TEST_TO) {
     const realMail = new MailService();

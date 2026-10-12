@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { ServiceUnavailableException, Injectable, OnModuleDestroy } from '@nestjs/common';
 import { Redis } from 'ioredis';
 
 @Injectable()
@@ -22,12 +22,13 @@ export class RateLimitService implements OnModuleDestroy {
         const ttl = Number(result?.[2]?.[1] ?? 60_000);
         return { allowed: count <= limit, remaining: Math.max(0, limit - count), resetAt: Date.now() + Math.max(0, ttl) };
       } catch {
-        // Local development remains usable if Redis has not been started yet.
+        if (process.env.NODE_ENV === 'production') throw new ServiceUnavailableException('Protection temporairement indisponible. Réessayez plus tard.');
       }
     }
     const now = Date.now();
+    for (const [id,times] of this.fallback) if (!times.length || times[times.length-1]<now-60000) this.fallback.delete(id);
     const recent = (this.fallback.get(key) ?? []).filter((at) => at > now - 60_000);
-    recent.push(now); this.fallback.set(key, recent);
+    if (recent.length < limit + 1) recent.push(now); this.fallback.set(key, recent);
     return { allowed: recent.length <= limit, remaining: Math.max(0, limit - recent.length), resetAt: now + 60_000 };
   }
 

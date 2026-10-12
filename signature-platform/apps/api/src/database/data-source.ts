@@ -17,7 +17,7 @@ export default new DataSource({
   password: process.env.DATABASE_PASSWORD,
   database: process.env.DATABASE_NAME ?? 'signeo',
   schema: process.env.DATABASE_SCHEMA ?? 'public',
-  ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: true } : false,
   entities: [resolve(here, '../**/*.entity.js')],
   migrations: [resolve(here, 'migrations/*.js')],
   migrationsTableName: 'schema_migrations',

@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Get, Headers, Patch, Post, Query, Request, Req, Res, UseGuards } from '@nestjs/common';
+import { AuthRateGuard } from './auth-rate.guard.js';
+import { BadRequestException, Delete, Param, ParseUUIDPipe, Body, Controller, Get, Headers, Patch, Post, Query, Request, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request as ExpressRequest, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
@@ -15,6 +16,7 @@ export class AuthController {
   constructor(private readonly auth: AuthService, private readonly google: GoogleOAuthService, private readonly identity: IdentityVerificationService) {}
 
   @Post('signup')
+  @UseGuards(AuthRateGuard)
   signup(@Body() body: SignupBody) {
     if (!body.name?.trim() || !body.email?.trim() || !body.password || body.password.length < 8) {
       throw new BadRequestException('Nom, e-mail et mot de passe de 8 caractères minimum requis.');
@@ -23,6 +25,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @UseGuards(AuthRateGuard)
   login(@Body() body: LoginBody) {
     if (!body.email?.trim() || !body.password) {
       throw new BadRequestException('E-mail et mot de passe requis.');
@@ -31,12 +34,14 @@ export class AuthController {
   }
 
   @Post('password-reset/request')
+  @UseGuards(AuthRateGuard)
   requestPasswordReset(@Body() body: PasswordResetBody) {
     if (!body.email?.trim()) throw new BadRequestException('Adresse e-mail requise.');
     return this.auth.requestPasswordReset(body.email, process.env.WEB_ORIGIN ?? 'http://localhost:3000');
   }
 
   @Post('password-reset/confirm')
+  @UseGuards(AuthRateGuard)
   confirmPasswordReset(@Body() body: { token?: string; password?: string }) {
     if (!body.token || !body.password || body.password.length < 8) {
       throw new BadRequestException('Un lien valide et un mot de passe de 8 caractères minimum sont requis.');
@@ -83,9 +88,37 @@ export class AuthController {
   }
 
   @Post('google/exchange')
+  @UseGuards(AuthRateGuard)
   googleExchange(@Body() body: { code?: string }) {
     if (!body.code) throw new BadRequestException('Code de connexion Google requis.');
     return this.auth.exchangeGoogleLoginCode(body.code);
+  }
+
+  @Patch('profile')
+  @UseGuards(JwtAuthGuard)
+  profile(@Request() request: {user:{sub:string}}, @Body() body: {name?:string}) { return this.auth.updateProfile(request.user.sub,body.name ?? ''); }
+
+  @Get('sessions')
+  @UseGuards(JwtAuthGuard)
+  sessions(@Request() request:{user:{sub:string;jti:string}}) { return this.auth.sessions(request.user.sub,request.user.jti); }
+
+  @Post('sessions/revoke-others')
+  @UseGuards(JwtAuthGuard)
+  revokeOthers(@Request() request:{user:{sub:string;jti:string}}) { return this.auth.revokeOtherSessions(request.user.sub,request.user.jti); }
+
+  @Delete('sessions/:id')
+  @UseGuards(JwtAuthGuard)
+  revokeSession(@Request() request:{user:{sub:string}}, @Param('id',ParseUUIDPipe) id:string) { return this.auth.revokeSession(request.user.sub,id); }
+
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  logout(@Request() request:{user:{sub:string;jti:string}}) { return this.auth.revokeSession(request.user.sub,request.user.jti); }
+
+  @Post('password')
+  @UseGuards(JwtAuthGuard,AuthRateGuard)
+  password(@Request() request:{user:{sub:string}},@Body() body:{currentPassword?:string;password?:string}) {
+    if (typeof body.currentPassword !== 'string' || typeof body.password !== 'string' || body.password.length<12 || Buffer.byteLength(body.password,'utf8')>72) throw new BadRequestException('Mot de passe requis : 12 caractères minimum, 72 octets maximum.');
+    return this.auth.changePassword(request.user.sub,body.currentPassword,body.password);
   }
 
   @Get('me')

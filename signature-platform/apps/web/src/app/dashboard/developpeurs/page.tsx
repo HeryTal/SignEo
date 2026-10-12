@@ -2,13 +2,14 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { DashboardLayout } from "@/app/ui/dashboard/dashboard-layout";
+import {WebhooksPanel} from "./webhooks-panel";
 import styles from "./developers.module.css";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 type Key = { id: string; name: string; environment: string; prefix: string; scopes: string[]; createdAt: string; revokedAt: string | null };
 type Log = { id: string; method: string; path: string; createdAt: string; keyName: string };
-type Tab = "keys" | "logs" | "docs" | "limits";
-const tabs: [Tab, string][] = [["keys", "Clés API"], ["logs", "Journal des appels"], ["docs", "Documentation"], ["limits", "Limites"]];
+type Tab = "keys" | "logs" | "docs" | "limits" | "webhooks";
+const tabs: [Tab, string][] = [["webhooks", "Webhooks"], ["keys", "Clés API"], ["logs", "Journal des appels"], ["docs", "Documentation"], ["limits", "Limites"]];
 const date = (value: string) => new Date(value).toLocaleString("fr-FR");
 const message = (error: unknown) => error instanceof Error ? error.message : "Une erreur est survenue.";
 
@@ -123,6 +124,7 @@ export default function DevelopersPage() {
 if (!response.ok) throw new Error("HTTP " + response.status);
 const { data } = await response.json();
 console.log(data);`}/><h4>3. Lire le résultat</h4><Code title="Exemple du tableau data" value={'[\n  {\n    "id": "identifiant-de-l-enveloppe",\n    "title": "Contrat",\n    "status": "SENT",\n    "createdAt": "2026-09-30T12:00:00.000Z",\n    "recipientCount": 2,\n    "documentCount": 1\n  }\n]'}/><p><code>data</code> contient les enveloppes. <code>limit: 60</code> décrit la limite de débit, pas un nombre de résultats. Le champ <code>remaining</code> est actuellement un texte indicatif, pas un compteur.</p><h4>4. Résoudre une erreur</h4><div className={styles.table}><table><thead><tr><th>Code HTTP</th><th>Signification</th><th>Action</th></tr></thead><tbody>{[["200", "Appel réussi", "Lisez le tableau data, éventuellement vide."], ["401", "Clé absente, invalide ou révoquée", "Vérifiez la clé et le préfixe Bearer."], ["403", "Permission manquante", "Utilisez une clé avec envelopes:read."], ["429", "Trop de requêtes", "Attendez 60 secondes avant de réessayer."]].map((row) => <tr key={row[0]}>{row.map((cell) => <td key={cell}>{cell}</td>)}</tr>)}</tbody></table></div><h4>Spécification OpenAPI</h4><p>Importez cette URL dans Postman ou un outil compatible pour explorer l’endpoint disponible.</p><a className={styles.secondary} href={API + "/v1/openapi.json"} target="_blank" rel="noreferrer">Ouvrir le document OpenAPI ↗</a><p className={styles.note}>Les routes d’écriture, les webhooks et l’isolation des données Sandbox ne sont pas encore disponibles.</p></section>}
+      {tab === "webhooks" && <WebhooksPanel admin={admin}/>}
       {tab === "limits" && <section className={styles.card}><span className={styles.eyebrow}>DÉBIT PAR CLÉ</span><h3 className={styles.number}>60 <small>requêtes / minute</small></h3><p>Les appels autorisés sont comptés sur les 60 dernières secondes. Lorsque cette limite est atteinte, l’API répond avec le code HTTP 429 et les en-têtes de limite.</p><p>Avec <code>REDIS_URL</code>, les compteurs sont partagés entre les serveurs et résistent aux redémarrages.</p></section>}
     </div>
   </DashboardLayout>;

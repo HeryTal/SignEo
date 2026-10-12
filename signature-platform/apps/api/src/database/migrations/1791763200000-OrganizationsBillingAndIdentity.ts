@@ -2,6 +2,8 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class OrganizationsBillingAndIdentity1791763200000 implements MigrationInterface {
   async up(queryRunner: QueryRunner): Promise<void> {
+    const schema=(queryRunner.connection.options as {schema?:string}).schema??'public';
+    await queryRunner.query("SELECT set_config('search_path', $1, true)", ['"'+schema.replaceAll('"','""')+'", public']);
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS organizations (
         id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),

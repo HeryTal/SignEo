@@ -1,3 +1,6 @@
+import { AuthSession } from './auth-session.entity.js';
+import { AuthRateGuard } from './auth-rate.guard.js';
+import { RateLimitService } from '../developer/rate-limit.service.js';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -13,7 +16,7 @@ import { IdentityVerificationService } from '../users/identity-verification.serv
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, IdentityVerification]),
+    TypeOrmModule.forFeature([User, IdentityVerification, AuthSession]),
     WorkspacesModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET ?? 'local-development-secret-change-me',
@@ -21,7 +24,7 @@ import { IdentityVerificationService } from '../users/identity-verification.serv
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, GoogleOAuthService, AuthMailService, IdentityVerificationService, JwtAuthGuard],
+  providers: [AuthRateGuard, RateLimitService, AuthService, GoogleOAuthService, AuthMailService, IdentityVerificationService, JwtAuthGuard],
   exports: [JwtAuthGuard, JwtModule],
 })
 export class AuthModule {}

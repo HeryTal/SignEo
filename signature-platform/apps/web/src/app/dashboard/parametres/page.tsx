@@ -2,6 +2,8 @@
 
 import { CSSProperties, FormEvent, useEffect, useState } from "react";
 import { DashboardLayout } from "@/app/ui/dashboard/dashboard-layout";
+import { InvitationContent } from "@/app/ui/branded-invitation";
+import { AccountPanel } from "./account-panel";
 import styles from "./settings.module.css";
 import { SigneoMark } from "@/app/ui/signeo-logo";
 
@@ -97,7 +99,7 @@ export default function SettingsPage() {
     textSize: 11,
     signatureSize: 22,
   });
-  const [section, setSection] = useState<"brand" | "identity" | "billing">(
+  const [section, setSection] = useState<"brand" | "identity" | "billing" | "account">(
     "brand",
   );
   const [preview, setPreview] = useState<"invitation" | "document">(
@@ -413,6 +415,9 @@ export default function SettingsPage() {
                 detail: "02",
               },
               {
+                id: "account", icon: "shield", label: "Compte & sécurité", detail: "03",
+              },
+              {
                 id: "billing",
                 icon: "card",
                 label: "Facturation & abonnement",
@@ -445,6 +450,7 @@ export default function SettingsPage() {
             </button>
           </div>
         )}
+        {section === "account" && <AccountPanel />}
         {section === "brand" && (
           <>
             <section id="brand-universes" className={styles.universes}>
@@ -860,66 +866,8 @@ export default function SettingsPage() {
                       </strong>
                     </div>
                     {preview === "invitation" ? (
-                      <>
-                        <div
-                          className={styles.inviteArtwork}
-                          style={{ color: accent }}
-                        >
-                          <div className={styles.artSheet}>
-                            <Icon name="type" />
-                            <span />
-                            <span />
-                            <em>Signature</em>
-                          </div>
-                          <div
-                            className={styles.artSeal}
-                            style={{ background: accent, color: buttonInk }}
-                          >
-                            <Icon name="check" />
-                          </div>
-                        </div>
-                        <span className={styles.paperEyebrow}>
-                          C’EST À VOUS DE SIGNER
-                        </span>
-                        <h4>
-                          Un accord commence
-                          <br />
-                          par une signature.
-                        </h4>
-                        <p
-                          style={{
-                            fontFamily: textFamily,
-                            color: branding.textColor,
-                            fontSize: branding.textSize,
-                          }}
-                        >
-                          Bonjour Camille,
-                          <br />
-                          <br />
-                          {branding.displayName || "Votre organisation"} vous
-                          invite à consulter et signer un document. Tout est
-                          prêt, il ne manque que vous.
-                        </p>
-                        <div className={styles.documentChip}>
-                          <Icon name="file" />
-                          <span>
-                            Contrat de prestation
-                            <small>PDF · Document à signer</small>
-                          </span>
-                          <Icon name="check" />
-                        </div>
-                        <span
-                          className={styles.previewCta}
-                          style={{ background: accent, color: buttonInk }}
-                        >
-                          Découvrir le document <span>↗</span>
-                        </span>
-                        <small className={styles.paperSecurity}>
-                          <Icon name="shield" /> Votre espace de signature
-                          sécurisé
-                        </small>
-                      </>
-                    ) : (
+<InvitationContent brand={branding} />
+) : (
                       <>
                         <span className={styles.paperEyebrow}>
                           APERÇU DU DOCUMENT

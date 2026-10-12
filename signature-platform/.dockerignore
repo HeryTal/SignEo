@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+**/.next
+**/dist
+.git
+.env
+.env.*
+!.env.example
+**/uploads
+backups
+**/*.p12
+**/*.pem
+**/*.key
+**/*.tsbuildinfo
