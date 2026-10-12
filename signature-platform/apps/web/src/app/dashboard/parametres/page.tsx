@@ -2,124 +2,1002 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { DashboardLayout } from "@/app/ui/dashboard/dashboard-layout";
+import styles from "./settings.module.css";
 import { SigneoMark } from "@/app/ui/signeo-logo";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-type Branding = { displayName: string; accentColor: string; logoUrl: string; textFont: "SANS" | "SERIF" | "MONO"; signatureFont: "SCRIPT" | "SERIF" | "SANS"; textColor: string; signatureColor: string; textSize: number; signatureSize: number };
-type IdentityVerification = { status: "NOT_STARTED" | "PENDING" | "VERIFIED" | "REJECTED"; provider: string | null; verifiedAt: string | null; rejectionReason: string | null };
-type Billing = { organization: { id: string; name: string }; billingEmail: string | null; plan: string; subscriptionStatus: string; usage: { envelopesThisMonth: number; includedEnvelopesPerMonth: number } };
+type Branding = {
+  displayName: string;
+  accentColor: string;
+  logoUrl: string;
+  textFont: "SANS" | "SERIF" | "MONO";
+  signatureFont: "SCRIPT" | "SERIF" | "SANS";
+  textColor: string;
+  signatureColor: string;
+  textSize: number;
+  signatureSize: number;
+};
+type IdentityVerification = {
+  status: "NOT_STARTED" | "PENDING" | "VERIFIED" | "REJECTED";
+  provider: string | null;
+  verifiedAt: string | null;
+  rejectionReason: string | null;
+};
+type Billing = {
+  organization: { id: string; name: string };
+  billingEmail: string | null;
+  plan: string;
+  subscriptionStatus: string;
+  usage: { envelopesThisMonth: number; includedEnvelopesPerMonth: number };
+};
 
 export default function SettingsPage() {
-  const [branding, setBranding] = useState<Branding>({ displayName: "Signeo", accentColor: "#496b50", logoUrl: "", textFont: "SANS", signatureFont: "SCRIPT", textColor: "#24352b", signatureColor: "#315b45", textSize: 11, signatureSize: 22 });
+  const [branding, setBranding] = useState<Branding>({
+    displayName: "Signeo",
+    accentColor: "#496b50",
+    logoUrl: "",
+    textFont: "SANS",
+    signatureFont: "SCRIPT",
+    textColor: "#24352b",
+    signatureColor: "#315b45",
+    textSize: 11,
+    signatureSize: 22,
+  });
+  const [section, setSection] = useState<"brand" | "identity" | "billing">(
+    "brand",
+  );
+  const [preview, setPreview] = useState<"invitation" | "document">(
+    "invitation",
+  );
+  const [savedBranding, setSavedBranding] = useState<Branding | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const dirty =
+    savedBranding !== null &&
+    JSON.stringify(branding) !== JSON.stringify(savedBranding);
+  const update = <K extends keyof Branding>(key: K, value: Branding[K]) =>
+    setBranding((current) => ({ ...current, [key]: value }));
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [role, setRole] = useState("");
-  const [identity, setIdentity] = useState<IdentityVerification>({ status: "NOT_STARTED", provider: null, verifiedAt: null, rejectionReason: null });
+  const [identity, setIdentity] = useState<IdentityVerification>({
+    status: "NOT_STARTED",
+    provider: null,
+    verifiedAt: null,
+    rejectionReason: null,
+  });
   const [billing, setBilling] = useState<Billing | null>(null);
   const [billingEmail, setBillingEmail] = useState("");
   useEffect(() => {
     const token = localStorage.getItem("signeo_access_token");
-    if (!token) return;
-    Promise.all([fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } }), fetch(`${API}/billing`, { headers: { Authorization: `Bearer ${token}` } })])
-      .then(async ([profileResponse, billingResponse]) => { if (profileResponse.ok) { const profile = await profileResponse.json(); if (profile.branding) setBranding(profile.branding); if (profile.identityVerification) setIdentity(profile.identityVerification); setRole(profile.activeWorkspace?.role ?? ""); } if (billingResponse.ok) { const value = await billingResponse.json(); setBilling(value); setBillingEmail(value.billingEmail ?? ""); } })
-      .catch(() => setNotice("Impossible de charger les paramètres. Vérifiez que l’API est démarrée."))
+    if (!token) {
+      setLoading(false);
+      setLoadError(true);
+      return;
+    }
+    Promise.all([
+      fetch(`${API}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      fetch(`${API}/billing`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ])
+      .then(async ([profileResponse, billingResponse]) => {
+        if (profileResponse.ok) {
+          const profile = await profileResponse.json();
+          if (profile.branding) {
+            setBranding(profile.branding);
+            setSavedBranding(profile.branding);
+          }
+          if (profile.identityVerification)
+            setIdentity(profile.identityVerification);
+          setRole(profile.activeWorkspace?.role ?? "");
+        } else {
+          setLoadError(true);
+          setNotice(
+            "Impossible de charger votre personnalisation. Actualisez la page pour réessayer.",
+          );
+        }
+        if (billingResponse.ok) {
+          const value = await billingResponse.json();
+          setBilling(value);
+          setBillingEmail(value.billingEmail ?? "");
+        }
+      })
+      .catch(() =>
+        setNotice(
+          "Impossible de charger les paramètres. Vérifiez que l’API est démarrée.",
+        ),
+      )
       .finally(() => setLoading(false));
   }, []);
   async function save(event: FormEvent) {
     event.preventDefault();
-    setBusy(true); setNotice("");
+    setBusy(true);
+    setNotice("");
     try {
       const token = localStorage.getItem("signeo_access_token");
-      const response = await fetch(`${API}/auth/branding`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(branding) });
+      const response = await fetch(`${API}/auth/branding`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(branding),
+      });
       const result = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(result?.message ?? "La personnalisation n’a pas été enregistrée.");
-      setNotice("Identité de marque enregistrée. Les prochaines enveloppes l’utiliseront.");
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Erreur réseau."); }
-    finally { setBusy(false); }
+      if (!response.ok)
+        throw new Error(
+          result?.message ?? "La personnalisation n’a pas été enregistrée.",
+        );
+      setNotice(
+        "Identité de marque enregistrée. Les prochaines enveloppes l’utiliseront.",
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Erreur réseau.");
+    } finally {
+      setBusy(false);
+    }
   }
   async function startIdentityVerification() {
-    setBusy(true); setNotice("");
+    setBusy(true);
+    setNotice("");
     try {
       const token = localStorage.getItem("signeo_access_token");
-      const response = await fetch(`${API}/auth/identity-verification`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+      const response = await fetch(`${API}/auth/identity-verification`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const result = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(result?.message ?? "La vérification n’a pas pu démarrer.");
-      setIdentity(result); setNotice(result.verificationUrl ? "Vérification créée. Ouvrez le parcours sécurisé du prestataire." : "Vérification en attente.");
-      if (result.verificationUrl) window.open(result.verificationUrl, "_blank", "noopener,noreferrer");
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Erreur réseau."); }
-    finally { setBusy(false); }
+      if (!response.ok)
+        throw new Error(
+          result?.message ?? "La vérification n’a pas pu démarrer.",
+        );
+      setIdentity(result);
+      setNotice(
+        result.verificationUrl
+          ? "Vérification créée. Ouvrez le parcours sécurisé du prestataire."
+          : "Vérification en attente.",
+      );
+      if (result.verificationUrl)
+        window.open(result.verificationUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Erreur réseau.");
+    } finally {
+      setBusy(false);
+    }
   }
   async function saveBilling(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setNotice("");
+    event.preventDefault();
+    setBusy(true);
+    setNotice("");
     try {
       const token = localStorage.getItem("signeo_access_token");
-      const response = await fetch(`${API}/billing`, { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ billingEmail }) });
+      const response = await fetch(`${API}/billing`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ billingEmail }),
+      });
       const result = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(result?.message ?? "La facturation n’a pas pu être enregistrée.");
-      setBilling(result); setNotice("Adresse de facturation enregistrée.");
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Erreur réseau."); }
-    finally { setBusy(false); }
+      if (!response.ok)
+        throw new Error(
+          result?.message ?? "La facturation n’a pas pu être enregistrée.",
+        );
+      setBilling(result);
+      setNotice("Adresse de facturation enregistrée.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Erreur réseau.");
+    } finally {
+      setBusy(false);
+    }
   }
-  async function billingAction(path: "checkout" | "portal", plan?: "BUSINESS" | "ENTERPRISE") {
-    setBusy(true); setNotice("");
+  async function billingAction(
+    path: "checkout" | "portal",
+    plan?: "BUSINESS" | "ENTERPRISE",
+  ) {
+    setBusy(true);
+    setNotice("");
     try {
       const token = localStorage.getItem("signeo_access_token");
-      const response = await fetch(`${API}/billing/${path}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: plan ? JSON.stringify({ plan }) : undefined });
+      const response = await fetch(`${API}/billing/${path}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: plan ? JSON.stringify({ plan }) : undefined,
+      });
       const result = await response.json().catch(() => null);
-      if (!response.ok || !result?.url) throw new Error(result?.message ?? "Le portail Stripe n’est pas disponible.");
+      if (!response.ok || !result?.url)
+        throw new Error(
+          result?.message ?? "Le portail Stripe n’est pas disponible.",
+        );
       window.location.assign(result.url);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Erreur réseau."); }
-    finally { setBusy(false); }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Erreur réseau.");
+    } finally {
+      setBusy(false);
+    }
   }
-  return <DashboardLayout title="Personnalisation de marque" description="Adaptez l’expérience des invitations à l’identité de votre organisation.">
-    <div className="brand-settings-grid">
-      <form className="settings-card" onSubmit={save}>
-        <h2>Identité de l’expéditeur</h2>
-        <p>Cette marque apparaît sur les prochaines pages de signature. Chaque enveloppe garde une copie de ces réglages.</p>
-        <label className="form-field">Nom affiché<input required maxLength={80} value={branding.displayName} onChange={(event) => setBranding({ ...branding, displayName: event.target.value })} /></label>
-        <label className="form-field">Couleur principale<input type="color" value={branding.accentColor} onChange={(event) => setBranding({ ...branding, accentColor: event.target.value })} /></label>
-        <label className="form-field">Logo (URL HTTPS)<input type="url" placeholder="https://exemple.fr/logo.png" value={branding.logoUrl} onChange={(event) => setBranding({ ...branding, logoUrl: event.target.value })} /></label>
-        <h2 className="style-settings-title">Style du texte dans les documents</h2>
-        <label className="form-field">Police du texte
-          <select value={branding.textFont} onChange={(event) => setBranding({ ...branding, textFont: event.target.value as Branding["textFont"] })}><option value="SANS">Sans sérif</option><option value="SERIF">Sérif</option><option value="MONO">Machine à écrire</option></select>
-        </label>
-        <div className="style-control-row"><label className="form-field">Couleur du texte<input type="color" value={branding.textColor} onChange={(event) => setBranding({ ...branding, textColor: event.target.value })} /></label><label className="form-field">Taille du texte ({branding.textSize}px)<input type="range" min="8" max="18" value={branding.textSize} onChange={(event) => setBranding({ ...branding, textSize: Number(event.target.value) })} /></label></div>
-        <h2 className="style-settings-title">Style des signatures</h2>
-        <label className="form-field">Écriture de la signature
-          <select value={branding.signatureFont} onChange={(event) => setBranding({ ...branding, signatureFont: event.target.value as Branding["signatureFont"] })}><option value="SCRIPT">Italique</option><option value="SERIF">Classique</option><option value="SANS">Moderne</option></select>
-        </label>
-        <div className="style-control-row"><label className="form-field">Couleur de la signature<input type="color" value={branding.signatureColor} onChange={(event) => setBranding({ ...branding, signatureColor: event.target.value })} /></label><label className="form-field">Taille de la signature ({branding.signatureSize}px)<input type="range" min="14" max="30" value={branding.signatureSize} onChange={(event) => setBranding({ ...branding, signatureSize: Number(event.target.value) })} /></label></div>
-        {notice && <p role="status" className="workflow-hint">{notice}</p>}
-        <button className="envelope-next" type="submit" disabled={busy || loading}>{busy ? "Enregistrement…" : "Enregistrer la marque"}</button>
-      </form>
-      <section className="settings-card brand-preview">
-        <p className="eyebrow">APERÇU DESTINATAIRE</p>
-        <div className="brand-preview-header" style={{ borderColor: branding.accentColor }}>
-          {branding.logoUrl ? <img src={branding.logoUrl} alt="Logo" /> : <SigneoMark />}
-          <b>{branding.displayName || "Votre organisation"}</b>
-        </div>
-        <h2>Une invitation vous attend</h2><p style={{ fontFamily: branding.textFont === "SERIF" ? "Georgia, serif" : branding.textFont === "MONO" ? "monospace" : "Arial, sans-serif", fontSize: branding.textSize, color: branding.textColor }}>Consultez le document et suivez les étapes de signature dans cet espace sécurisé.</p>
-        <div className="style-signature-preview" style={{ fontFamily: branding.signatureFont === "SCRIPT" || branding.signatureFont === "SERIF" ? "Georgia, serif" : "Arial, sans-serif", fontSize: branding.signatureSize, color: branding.signatureColor }}>Votre signature</div>
-        <button type="button" style={{ background: branding.accentColor }}>Consulter le document</button>
-        <small>La couleur et le nom sont enregistrés dans PostgreSQL avec votre compte.</small>
-      </section>
-      <section className="settings-card">
-        <p className="eyebrow">IDENTITÉ ET FACTURATION</p>
-        <h2>Vérification d’identité</h2>
-        <p>Statut : <b>{identity.status === "VERIFIED" ? "Vérifiée" : identity.status === "PENDING" ? "En attente" : identity.status === "REJECTED" ? "Refusée" : "Non démarrée"}</b></p>
-        {identity.rejectionReason && <p className="upload-error">{identity.rejectionReason}</p>}
-        {identity.status !== "VERIFIED" && <button type="button" className="secondary-action" onClick={() => void startIdentityVerification()} disabled={busy}>{identity.status === "PENDING" ? "Reprendre la vérification" : "Vérifier mon identité"}</button>}
-        {billing && <><h2 className="style-settings-title">Facturation · {billing.organization.name}</h2><p>Forfait <b>{billing.plan}</b> · {billing.usage.envelopesThisMonth}/{billing.usage.includedEnvelopesPerMonth} enveloppes ce mois.</p>{role === "ADMIN" ? <form onSubmit={saveBilling}><label className="form-field">E-mail de facturation<input required type="email" value={billingEmail} onChange={(event) => setBillingEmail(event.target.value)} /></label><button className="secondary-action" type="submit" disabled={busy}>Enregistrer la facturation</button></form> : <p className="workflow-hint">Seul un administrateur peut modifier la facturation.</p>}</>}
-      </section>
-      {billing && role === "ADMIN" && <section className="settings-card">
-        <p className="eyebrow">ABONNEMENT</p>
-        <h2>Stripe Billing</h2>
-        <p>Le paiement et la gestion de l’abonnement se font sur la page sécurisée de Stripe.</p>
-        <button type="button" className="secondary-action" disabled={busy} onClick={() => void billingAction("checkout", "BUSINESS")}>Choisir Business</button>
-        <button type="button" className="secondary-action" disabled={busy} onClick={() => void billingAction("checkout", "ENTERPRISE")}>Choisir Enterprise</button>
-        <button type="button" className="secondary-action" disabled={busy} onClick={() => void billingAction("portal")}>Gérer l’abonnement</button>
-      </section>}
-    </div>
-  </DashboardLayout>;
+  const textFamily =
+    branding.textFont === "SERIF"
+      ? "Georgia, serif"
+      : branding.textFont === "MONO"
+        ? "monospace"
+        : "var(--sans)";
+  const signatureFamily =
+    branding.signatureFont === "SANS" ? "var(--sans)" : "Georgia, serif";
+  const accent = branding.accentColor;
+  const hex = accent.replace("#", "");
+  const buttonInk =
+    parseInt(hex.slice(0, 2), 16) * 0.299 +
+      parseInt(hex.slice(2, 4), 16) * 0.587 +
+      parseInt(hex.slice(4, 6), 16) * 0.114 >
+    155
+      ? "#172e24"
+      : "#fff";
+  const identityLabel = {
+    VERIFIED: "Identité vérifiée",
+    PENDING: "En cours de vérification",
+    REJECTED: "Vérification à reprendre",
+    NOT_STARTED: "À vérifier",
+  }[identity.status];
+  return (
+    <DashboardLayout
+      title="Les détails font votre signature."
+      eyebrow="VOTRE ESPACE, À VOTRE IMAGE"
+      description="Une expérience qui vous ressemble, du premier regard à la dernière signature."
+    >
+      <div className={styles.settings}>
+        <nav className={styles.tabs} aria-label="Rubriques des paramètres">
+          {(
+            [
+              {
+                id: "brand",
+                icon: "brand",
+                label: "Identité de marque",
+                detail: "01",
+              },
+              {
+                id: "identity",
+                icon: "shield",
+                label: "Vérification d’identité",
+                detail: "02",
+              },
+              {
+                id: "billing",
+                icon: "card",
+                label: "Facturation & abonnement",
+                detail: "03",
+              },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              aria-current={section === tab.id ? "page" : undefined}
+              onClick={() => setSection(tab.id)}
+            >
+              <Icon name={tab.icon} />
+              <span>{tab.label}</span>
+              <small>{tab.detail}</small>
+            </button>
+          ))}
+        </nav>
+        {notice && (
+          <div className={styles.notice} role="status">
+            <Icon name="info" />
+            <span>{notice}</span>
+            <button
+              type="button"
+              onClick={() => setNotice("")}
+              aria-label="Fermer le message"
+            >
+              ×
+            </button>
+          </div>
+        )}
+        {section === "brand" && (
+          <>
+            <div className={styles.intro}>
+              <div>
+                <span className={styles.kicker}>LE STUDIO DE VOTRE MARQUE</span>
+                <h3>Faites bonne impression.</h3>
+                <p>
+                  Quelques détails. Une expérience de signature à part entière.
+                </p>
+              </div>
+              <span className={styles.live}>
+                <i /> Aperçu en direct
+              </span>
+            </div>
+            <div className={styles.studio}>
+              <form id="brand-form" onSubmit={save} className={styles.editor}>
+                <fieldset disabled={loading || busy || loadError}>
+                  <section className={styles.editorSection}>
+                    <div className={styles.sectionTitle}>
+                      <span className={styles.sectionIcon}>
+                        <Icon name="brand" />
+                      </span>
+                      <div>
+                        <h4>Votre identité</h4>
+                        <p>Le premier contact avec vos destinataires.</p>
+                      </div>
+                      <span className={styles.step}>01</span>
+                    </div>
+                    <label className={styles.field}>
+                      Nom de l’expéditeur
+                      <input
+                        required
+                        maxLength={80}
+                        value={branding.displayName}
+                        placeholder="Le nom de votre organisation"
+                        onChange={(event) =>
+                          update("displayName", event.target.value)
+                        }
+                      />
+                    </label>
+                    <div className={styles.logoRow}>
+                      <div className={styles.logoTile}>
+                        <BrandLogo url={branding.logoUrl} />
+                      </div>
+                      <label className={styles.field}>
+                        Logo de votre organisation
+                        <input
+                          type="url"
+                          pattern="https://.*"
+                          placeholder="https://votre-site.fr/logo.png"
+                          value={branding.logoUrl}
+                          onChange={(event) =>
+                            update("logoUrl", event.target.value)
+                          }
+                        />
+                        <small>
+                          Un lien HTTPS vers votre logo, idéalement sur fond
+                          transparent.
+                        </small>
+                      </label>
+                      {branding.logoUrl && (
+                        <button
+                          className={styles.iconButton}
+                          type="button"
+                          aria-label="Retirer le logo"
+                          onClick={() => update("logoUrl", "")}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                    <label className={styles.field} htmlFor="accent">
+                      Couleur de marque
+                    </label>
+                    <div className={styles.palette}>
+                      {[
+                        { color: "#496b50", name: "Sauge" },
+                        { color: "#194e3d", name: "Forêt" },
+                        { color: "#303b6f", name: "Indigo" },
+                        { color: "#806290", name: "Prune" },
+                        { color: "#b35e43", name: "Terre cuite" },
+                        { color: "#242b2a", name: "Graphite" },
+                      ].map(({ color, name }) => (
+                        <button
+                          type="button"
+                          key={color}
+                          title={name}
+                          aria-label={name}
+                          aria-pressed={accent.toLowerCase() === color}
+                          style={{ background: color }}
+                          onClick={() => update("accentColor", color)}
+                        >
+                          {accent.toLowerCase() === color && (
+                            <Icon name="check" />
+                          )}
+                        </button>
+                      ))}
+                      <div className={styles.colorValue}>
+                        <input
+                          id="accent"
+                          aria-label="Couleur de marque personnalisée"
+                          type="color"
+                          value={accent}
+                          onChange={(event) =>
+                            update("accentColor", event.target.value)
+                          }
+                        />
+                        <span>{accent.toUpperCase()}</span>
+                      </div>
+                    </div>
+                  </section>
+                  <section className={styles.editorSection}>
+                    <div className={styles.sectionTitle}>
+                      <span className={styles.sectionIcon}>
+                        <Icon name="type" />
+                      </span>
+                      <div>
+                        <h4>Le sens du détail</h4>
+                        <p>Une typographie qui donne le ton.</p>
+                      </div>
+                      <span className={styles.step}>02</span>
+                    </div>
+                    <span className={styles.fieldLabel}>
+                      Police des documents
+                    </span>
+                    <div
+                      className={styles.fontChoices}
+                      role="group"
+                      aria-label="Police des documents"
+                    >
+                      {(
+                        [
+                          {
+                            value: "SANS",
+                            label: "Essentielle",
+                            family: "var(--sans)",
+                          },
+                          {
+                            value: "SERIF",
+                            label: "Éditoriale",
+                            family: "Georgia, serif",
+                          },
+                          {
+                            value: "MONO",
+                            label: "Technique",
+                            family: "monospace",
+                          },
+                        ] as const
+                      ).map((font) => (
+                        <button
+                          key={font.value}
+                          type="button"
+                          aria-pressed={branding.textFont === font.value}
+                          onClick={() => update("textFont", font.value)}
+                        >
+                          <span style={{ fontFamily: font.family }}>Aa</span>
+                          <small>{font.label}</small>
+                          {branding.textFont === font.value && (
+                            <i>
+                              <Icon name="check" />
+                            </i>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    <div className={styles.controls}>
+                      <label className={styles.field}>
+                        Couleur du texte
+                        <div className={styles.colorValue}>
+                          <input
+                            type="color"
+                            value={branding.textColor}
+                            onChange={(event) =>
+                              update("textColor", event.target.value)
+                            }
+                          />
+                          <span>{branding.textColor.toUpperCase()}</span>
+                        </div>
+                      </label>
+                      <label className={styles.field}>
+                        Taille du texte{" "}
+                        <span className={styles.measure}>
+                          {branding.textSize} px
+                        </span>
+                        <input
+                          type="range"
+                          min="8"
+                          max="18"
+                          value={branding.textSize}
+                          onChange={(event) =>
+                            update("textSize", Number(event.target.value))
+                          }
+                        />
+                      </label>
+                    </div>
+                    <div className={styles.signatureControls}>
+                      <label className={styles.field}>
+                        Style de signature
+                        <select
+                          value={branding.signatureFont}
+                          onChange={(event) =>
+                            update(
+                              "signatureFont",
+                              event.target.value as Branding["signatureFont"],
+                            )
+                          }
+                        >
+                          <option value="SCRIPT">Manuscrite · Italique</option>
+                          <option value="SERIF">Classique · Sérif</option>
+                          <option value="SANS">
+                            Contemporaine · Sans sérif
+                          </option>
+                        </select>
+                      </label>
+                      <div className={styles.controls}>
+                        <label className={styles.field}>
+                          Couleur de la signature
+                          <div className={styles.colorValue}>
+                            <input
+                              type="color"
+                              value={branding.signatureColor}
+                              onChange={(event) =>
+                                update("signatureColor", event.target.value)
+                              }
+                            />
+                            <span>{branding.signatureColor.toUpperCase()}</span>
+                          </div>
+                        </label>
+                        <label className={styles.field}>
+                          Taille de la signature{" "}
+                          <span className={styles.measure}>
+                            {branding.signatureSize} px
+                          </span>
+                          <input
+                            type="range"
+                            min="14"
+                            max="30"
+                            value={branding.signatureSize}
+                            onChange={(event) =>
+                              update(
+                                "signatureSize",
+                                Number(event.target.value),
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </section>
+                </fieldset>
+              </form>
+              <aside
+                className={styles.previewColumn}
+                aria-label="Aperçu de votre personnalisation"
+              >
+                <div className={styles.previewTop}>
+                  <span>DE LÇAUTRE CÔTÉ DE L’ÉCRAN</span>
+                  <Icon name="eye" />
+                </div>
+                <div
+                  className={styles.previewSwitch}
+                  role="group"
+                  aria-label="Type d’aperçu"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={preview === "invitation"}
+                    onClick={() => setPreview("invitation")}
+                  >
+                    Invitation
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={preview === "document"}
+                    onClick={() => setPreview("document")}
+                  >
+                    Document
+                  </button>
+                </div>
+                <div className={styles.previewStage}>
+                  <div
+                    className={styles.previewPaper}
+                    style={{ borderTopColor: accent }}
+                  >
+                    <div className={styles.paperBrand}>
+                      <BrandLogo url={branding.logoUrl} />
+                      <strong>
+                        {branding.displayName || "Votre organisation"}
+                      </strong>
+                    </div>
+                    {preview === "invitation" ? (
+                      <>
+                        <div
+                          className={styles.inviteArtwork}
+                          style={{ color: accent }}
+                        >
+                          <div className={styles.artSheet}>
+                            <Icon name="type" />
+                            <span />
+                            <span />
+                            <em>Signature</em>
+                          </div>
+                          <div
+                            className={styles.artSeal}
+                            style={{ background: accent, color: buttonInk }}
+                          >
+                            <Icon name="check" />
+                          </div>
+                        </div>
+                        <span className={styles.paperEyebrow}>
+                          C’EST À VOUS DE SIGNER
+                        </span>
+                        <h4>
+                          Un accord commence
+                          <br />
+                          par une signature.
+                        </h4>
+                        <p
+                          style={{
+                            fontFamily: textFamily,
+                            color: branding.textColor,
+                            fontSize: branding.textSize,
+                          }}
+                        >
+                          Bonjour Camille,
+                          <br />
+                          <br />
+                          {branding.displayName || "Votre organisation"} vous
+                          invite à consulter et signer un document. Tout est
+                          prêt, il ne manque que vous.
+                        </p>
+                        <div className={styles.documentChip}>
+                          <Icon name="file" />
+                          <span>
+                            Contrat de prestation
+                            <small>PDF · Document à signer</small>
+                          </span>
+                          <Icon name="check" />
+                        </div>
+                        <span
+                          className={styles.previewCta}
+                          style={{ background: accent, color: buttonInk }}
+                        >
+                          Découvrir le document <span>↗</span>
+                        </span>
+                        <small className={styles.paperSecurity}>
+                          <Icon name="shield" /> Votre espace de signature
+                          sécurisé
+                        </small>
+                      </>
+                    ) : (
+                      <>
+                        <span className={styles.paperEyebrow}>
+                          APERÇU DU DOCUMENT
+                        </span>
+                        <h4>
+                          Chaque détail
+                          <br />
+                          porte votre marque.
+                        </h4>
+                        <div
+                          className={styles.documentText}
+                          style={{
+                            fontFamily: textFamily,
+                            color: branding.textColor,
+                            fontSize: branding.textSize,
+                          }}
+                        >
+                          <b>Contrat de prestation</b>
+                          <p>
+                            Le présent document formalise notre collaboration et
+                            les engagements convenus entre les parties.
+                          </p>
+                          <p>Lu et approuvé, pour accord.</p>
+                        </div>
+                        <div className={styles.signatureBox}>
+                          <small>Votre signature</small>
+                          <span
+                            style={{
+                              fontFamily: signatureFamily,
+                              fontStyle:
+                                branding.signatureFont === "SCRIPT"
+                                  ? "italic"
+                                  : "normal",
+                              color: branding.signatureColor,
+                              fontSize: branding.signatureSize,
+                            }}
+                          >
+                            Camille Martin
+                          </span>
+                          <div />
+                          <small>Le signataire</small>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div className={styles.powered}>
+                    Une expérience propulsée par <b>signeo.</b>
+                  </div>
+                </div>
+                <p className={styles.previewCaption}>
+                  <Icon name="info" /> Une illustration de l’expérience de vos
+                  destinataires. Vos modifications s’affichent instantanément.
+                </p>
+                <div className={styles.tip}>
+                  <span>✦</span>
+                  <div>
+                    <b>Une marque qui inspire confiance.</b>
+                    <p>
+                      Un nom reconnaissable et votre logo aident vos
+                      destinataires à identifier vos invitations.
+                    </p>
+                  </div>
+                </div>
+              </aside>
+            </div>
+            <div className={styles.saveBar}>
+              <div>
+                <span className={dirty ? styles.unsavedDot : styles.savedDot} />
+                <span>
+                  {loading
+                    ? "Chargement de votre marque…"
+                    : loadError
+                      ? "Paramètres indisponibles"
+                      : dirty
+                        ? "Modifications non enregistrées"
+                        : "Votre marque est à jour"}
+                  <small>
+                    Appliqué à vos prochaines enveloppes uniquement.
+                  </small>
+                </span>
+              </div>
+              <div>
+                <button
+                  type="button"
+                  className={styles.secondary}
+                  disabled={!dirty || busy}
+                  onClick={() => {
+                    if (savedBranding) setBranding({ ...savedBranding });
+                    setNotice("");
+                  }}
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  form="brand-form"
+                  className={styles.primary}
+                  disabled={busy || loading || loadError || !dirty}
+                >
+                  <Icon name="check" />
+                  {busy ? "Enregistrement…" : "Enregistrer les modifications"}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+        {section === "identity" && (
+          <div className={styles.accountGrid}>
+            <section className={styles.accountCard}>
+              <span className={styles.largeIcon}>
+                <Icon name="shield" />
+              </span>
+              <span className={styles.kicker}>LA CONFIANCE COMMENCE ICI</span>
+              <h3>Votre identité, confirmée.</h3>
+              <p>
+                Retrouvez le statut de votre vérification et accédez au parcours
+                sécurisé de notre prestataire.
+              </p>
+              <div className={styles.statusBadge}>
+                {loading ? "Chargement…" : identityLabel}
+              </div>
+              {identity.rejectionReason && (
+                <p role="alert">{identity.rejectionReason}</p>
+              )}
+              {identity.verifiedAt && (
+                <p>
+                  Vérifiée le{" "}
+                  {new Date(identity.verifiedAt).toLocaleDateString("fr-FR")}
+                </p>
+              )}
+              {identity.status !== "VERIFIED" && (
+                <button
+                  type="button"
+                  className={styles.primary}
+                  onClick={() => void startIdentityVerification()}
+                  disabled={busy || loading || loadError}
+                >
+                  {busy
+                    ? "Ouverture…"
+                    : identity.status === "PENDING"
+                      ? "Reprendre la vérification"
+                      : "Vérifier mon identité"}
+                  <span>↗</span>
+                </button>
+              )}
+            </section>
+            <aside className={styles.explainer}>
+              <span className={styles.kicker}>COMMENT ÇA SE PASSE ?</span>
+              <h3>
+                Un parcours dédié.
+                <br />
+                En toute simplicité.
+              </h3>
+              {[
+                "Ouvrez le parcours de vérification sécurisé.",
+                "Suivez les étapes indiquées par le prestataire.",
+                "Retrouvez votre statut dans cet espace.",
+              ].map((text, index) => (
+                <div key={text}>
+                  <span>0{index + 1}</span>
+                  <p>{text}</p>
+                </div>
+              ))}
+            </aside>
+          </div>
+        )}
+        {section === "billing" && (
+          <div className={styles.accountGrid}>
+            <section className={styles.accountCard}>
+              <span className={styles.kicker}>VOTRE ESPACE DE FACTURATION</span>
+              <h3>Tout est à sa place.</h3>
+              {billing ? (
+                <>
+                  <p>{billing.organization.name}</p>
+                  <div className={styles.planLine}>
+                    <span>
+                      Votre forfait<strong>{billing.plan}</strong>
+                    </span>
+                    <Icon name="card" />
+                  </div>
+                  <div className={styles.usage}>
+                    <span>
+                      Enveloppes ce mois
+                      <b>
+                        {billing.usage.envelopesThisMonth} /{" "}
+                        {billing.usage.includedEnvelopesPerMonth}
+                      </b>
+                    </span>
+                    <progress
+                      max={Math.max(1, billing.usage.includedEnvelopesPerMonth)}
+                      value={billing.usage.envelopesThisMonth}
+                    />
+                  </div>
+                  {role === "ADMIN" ? (
+                    <form onSubmit={saveBilling}>
+                      <label className={styles.field}>
+                        E-mail de facturation
+                        <input
+                          required
+                          type="email"
+                          value={billingEmail}
+                          onChange={(event) =>
+                            setBillingEmail(event.target.value)
+                          }
+                        />
+                      </label>
+                      <button
+                        className={styles.primary}
+                        type="submit"
+                        disabled={
+                          busy || billingEmail === (billing.billingEmail ?? "")
+                        }
+                      >
+                        Enregistrer l’adresse
+                      </button>
+                    </form>
+                  ) : (
+                    <p>Seul un administrateur peut modifier la facturation.</p>
+                  )}
+                </>
+              ) : (
+                <p>
+                  {loading
+                    ? "Chargement de la facturation…"
+                    : "La facturation est indisponible. Actualisez la page pour réessayer."}
+                </p>
+              )}
+            </section>
+            <aside className={styles.explainer}>
+              <span className={styles.kicker}>
+                DE LA PLACE POUR VOS AMBITIONS
+              </span>
+              <h3>
+                Votre activité grandit.
+                <br />
+                Votre espace aussi.
+              </h3>
+              <p>
+                Gérez votre abonnement, vos moyens de paiement et vos factures
+                depuis le portail sécurisé Stripe.
+              </p>
+              {billing && role === "ADMIN" && (
+                <div className={styles.billingActions}>
+                  <button
+                    className={styles.primary}
+                    disabled={busy}
+                    onClick={() => void billingAction("portal")}
+                  >
+                    Gérer mon abonnement ↗
+                  </button>
+                  <button
+                    className={styles.secondary}
+                    disabled={busy}
+                    onClick={() => void billingAction("checkout", "BUSINESS")}
+                  >
+                    Découvrir Business ↗
+                  </button>
+                  <button
+                    className={styles.secondary}
+                    disabled={busy}
+                    onClick={() => void billingAction("checkout", "ENTERPRISE")}
+                  >
+                    Découvrir Enterprise ↗
+                  </button>
+                </div>
+              )}
+            </aside>
+          </div>
+        )}
+      </div>
+    </DashboardLayout>
+  );
+}
+
+function BrandLogo({ url }: { url: string }) {
+  const [failedUrl, setFailedUrl] = useState("");
+  // Remote organization logos cannot be enumerated in Next's image configuration.
+  // eslint-disable-next-line @next/next/no-img-element
+  return url && failedUrl !== url ? (
+    <img
+      src={url}
+      alt="Logo de votre organisation"
+      onError={() => setFailedUrl(url)}
+    />
+  ) : (
+    <SigneoMark />
+  );
+}
+
+function Icon({ name }: { name: string }) {
+  const paths: Record<string, React.ReactNode> = {
+    brand: (
+      <>
+        <path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z" />
+        <path d="m19 3 .5 1.5L21 5l-1.5.5L19 7l-.5-1.5L17 5l1.5-.5Z" />
+      </>
+    ),
+    shield: (
+      <>
+        <path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6Z" />
+        <path d="m8.5 12 2.5 2.5 4.5-5" />
+      </>
+    ),
+    card: (
+      <>
+        <rect x="3" y="5" width="18" height="14" rx="3" />
+        <path d="M3 10h18M7 15h4" />
+      </>
+    ),
+    check: <path d="m5 12 4 4L19 6" />,
+    type: (
+      <>
+        <path d="M4 5h12M10 5v14M7 19h6M4 5v3M16 5v3M17 12h5M19.5 12v7" />
+      </>
+    ),
+    eye: (
+      <>
+        <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z" />
+        <circle cx="12" cy="12" r="3" />
+      </>
+    ),
+    file: (
+      <>
+        <path d="M14 3H5v18h14V8Z M14 3v5h5M8 12h8M8 16h5" />
+      </>
+    ),
+    info: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 11v6M12 7v1" />
+      </>
+    ),
+  };
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {paths[name]}
+    </svg>
+  );
 }
