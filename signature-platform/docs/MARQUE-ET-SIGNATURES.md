@@ -4,7 +4,7 @@
 
 Dans **Tableau de bord → Paramètres**, renseignez le nom, la couleur et l’URL HTTPS du logo. Ces informations sont enregistrées dans la colonne JSONB `users.branding` de PostgreSQL. À la création d’une enveloppe, Signeo copie les réglages dans `envelopes.brand_snapshot` : une invitation déjà envoyée conserve ainsi la même apparence.
 
-La même page permet de définir une police, une taille et une couleur par défaut pour le texte et les signatures. Dans la préparation d’une enveloppe, sélectionnez un champ posé sur le PDF pour remplacer son style individuellement. Le nom signé est actuellement saisi au clavier puis présenté avec le style choisi ; ce n’est pas encore une signature dessinée à la souris ou à l’écran tactile.
+La même page permet de définir une police, une taille et une couleur par défaut pour le texte et les signatures. Dans la préparation d’une enveloppe, sélectionnez un champ posé sur le PDF pour remplacer son style individuellement. Le signataire peut saisir son nom ou dessiner sa signature à la souris ou sur un écran tactile. L’aperçu des paramètres et l’accueil du signataire partagent le même composant ; les invitations et rappels HTML reprennent la marque enregistrée dans l’enveloppe.
 
 ## PDF avec signature cryptographique
 
@@ -20,7 +20,7 @@ SIGNING_CERT_NAME=Nom de l’organisation
 
 Redémarrez ensuite l’API. Le `.env` et le fichier P12 sont des secrets : ne les envoyez pas dans une capture ou un message et ne les commitez jamais. Sans certificat correctement configuré, Signeo enregistre l’événement de signature mais ne produit pas de PDF certifié.
 
-Ce certificat organisationnel crée une signature cryptographique de fichier ; il ne prouve pas à lui seul l’identité du signataire et ne transforme pas l’opération en signature avancée ou qualifiée eIDAS. Le niveau qualifié exige notamment un prestataire et un certificat qualifiés. Les options avancée/qualifiée et les vérifications par code e-mail/SMS restent désactivées tant qu’un fournisseur compatible n’est pas choisi et intégré.
+Ce certificat organisationnel crée une signature cryptographique de fichier ; il ne prouve pas à lui seul l’identité du signataire et ne transforme pas l’opération en signature avancée ou qualifiée eIDAS. Le niveau qualifié exige notamment un prestataire et un certificat qualifiés. La vérification par code e-mail est intégrée et nécessite un SMTP opérationnel. Les options avancée/qualifiée et la vérification SMS restent indisponibles.
 
 ## À comprendre
 

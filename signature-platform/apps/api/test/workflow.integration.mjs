@@ -36,10 +36,21 @@ try {
   assert.equal((await migrations.runMigrations()).length,0);
   const schemaDiff=await migrations.driver.createSchemaBuilder().log();
   assert.equal(schemaDiff.upQueries.length,0,'Frozen migrations must match entity schema: '+schemaDiff.upQueries.map(q=>q.query).join('; '));
+  const retainedUser=randomUUID();
+  await migrations.query('INSERT INTO "'+schema+'".users(id,name,email,password_hash) VALUES ($1, $2, $3, $4)',[retainedUser,'Migration fixture','migration-'+retainedUser+'@example.test','not-a-login']);
+  for(const table of ['auth_sessions','contacts','webhook_deliveries']) await migrations.query('DROP TABLE "'+schema+'"."'+table+'"');
+  await migrations.query('ALTER TABLE "'+schema+'".users DROP COLUMN auth_version');
+  await migrations.query('DELETE FROM "'+schema+'".schema_migrations WHERE name = $1',['ProductionReadiness1791849600000']);
+  assert.equal((await migrations.runMigrations()).length,1);
+  assert.equal((await migrations.query('SELECT auth_version FROM "'+schema+'".users WHERE id=$1',[retainedUser]))[0].auth_version,0);
+  assert.equal((await migrations.driver.createSchemaBuilder().log()).upQueries.length,0);
   await migrations.destroy();
+  console.log('PASS existing database: additive migration preserves users');
   console.log('PASS fresh database: all migrations without synchronize, no schema drift, repeat safe');
   const { AppModule } = await import('../dist/app.module.js');
   const { MailService } = await import('../dist/envelopes/mail.service.js');
+  const { AuthMailService } = await import('../dist/auth/auth-mail.service.js');
+  let resetUrl='';
   const { WebhooksService } = await import('../dist/webhooks/webhooks.service.js');
   const { EnvelopesService } = await import('../dist/envelopes/envelopes.service.js');
   const { Envelope } = await import('../dist/envelopes/envelope.entity.js');
@@ -49,7 +60,7 @@ try {
   const mail = Object.fromEntries(['sendInvitation', 'sendReminder', 'sendCompletionNotice', 'sendOtp'].map((kind) => [kind, async (...args) => { sent.push({ kind, args }); return { delivered: true }; }]));
   const module = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(MailService).useValue(mail)
-    .overrideProvider(WebhooksService).useValue({ dispatch: async () => undefined })
+    .overrideProvider(AuthMailService).useValue({sendPasswordReset:async(_to,_name,url)=>{resetUrl=url;return {delivered:true};}})
     .compile();
   app = module.createNestApplication({ logger: false });
   await app.listen(0, '127.0.0.1');
@@ -76,6 +87,7 @@ try {
   const profile = await request('/auth/me', undefined, token);
   assert.equal(profile.activeWorkspace.organizationId.length, 36);
   assert.equal(profile.identityVerification.status, 'NOT_STARTED');
+  const webhook=await request('/developer/webhooks',{name:'Local network rejection test',url:'https://127.0.0.1/events',events:['envelope.created','envelope.sent','envelope.completed']},token);
   const billing = await request('/billing', undefined, token);
   assert.equal(billing.organization.id, profile.activeWorkspace.organizationId);
   const updatedBilling = await request('/billing', { billingEmail: 'finance@example.test' }, token, {}, 'PATCH');
@@ -119,7 +131,18 @@ try {
   assert.ok((await fetch(`${base}/envelopes/public/${second}`)).status >= 400);
   assert.ok(sent.some((item) => item.kind === 'sendReminder'));
   assert.ok(sent.some((item) => item.kind === 'sendInvitation' && item.args[0].to === 'new1@example.test'));
-  console.log('PASS HTTP workflow: login, draft, template, send, reminder, ordered signing, completion, blocked links');
+  assert.equal(complete.documents[0].finalPdfAvailable,true);
+  const finalPdf=await fetch(`${base}/envelopes/${complete.id}/documents/${complete.documents[0].id}/signed`,{headers:{Authorization:'Bearer '+token}});
+  assert.equal(finalPdf.status,200);
+  const finalBytes=Buffer.from(await finalPdf.arrayBuffer());
+  assert.ok((await PDFDocument.load(finalBytes)).getPageCount()===1);
+  const evidence=await fetch(`${base}/envelopes/${complete.id}/evidence-bundle`,{headers:{Authorization:'Bearer '+token}});
+  assert.equal(evidence.status,200);assert.equal(Buffer.from(await evidence.arrayBuffer()).subarray(0,2).toString(),'PK');
+  const history=await request('/developer/webhooks/'+webhook.id+'/deliveries',undefined,token);
+  assert.ok(history.some(item=>item.event==='envelope.created'));
+  assert.ok(history.some(item=>item.event==='envelope.sent'));
+  assert.ok(history.some(item=>item.event==='envelope.completed'));
+  console.log('PASS HTTP workflow: login, draft, template, send, reminder, ordered signing, final PDF, evidence ZIP, durable webhook events');
 
   async function sentEnvelope(simultaneous = false, count = 2) {
     const value = await draft(simultaneous, count);
@@ -242,6 +265,18 @@ try {
   await request('/contacts/'+savedContact.id,undefined,token,{},'DELETE');
   console.log('PASS contacts: CRUD, normalization and cross-workspace isolation');
 
+  if (process.env.SMTP_TEST_TO) {
+    const realMail = new MailService();
+    mail.sendInvitation = realMail.sendInvitation.bind(realMail);
+    mail.sendReminder = realMail.sendReminder.bind(realMail);
+    people[0].email = process.env.SMTP_TEST_TO;
+    const value = await sentEnvelope(false, 1);
+    assert.equal(value.deliveries[0].delivered, true, JSON.stringify(value.deliveries));
+    await request(`/envelopes/${value.envelope.id}/recipients/${value.invitations[0].id}/remind`, {}, token);
+    await request(`/envelopes/${value.envelope.id}/cancel`, {}, token);
+    console.log('PASS live SMTP: invitation and reminder accepted; test envelope then cancelled');
+  }
+
   // A password change revokes every session, including signed tokens already issued.
   const secondSession=await request('/auth/login',{email,password});
   const sessions=await request('/auth/sessions',undefined,secondSession.accessToken);
@@ -254,19 +289,21 @@ try {
   const finalSession=await request('/auth/login',{email,password:newPassword});
   await request('/auth/logout',{},finalSession.accessToken);
   assert.equal((await fetch(base+'/auth/me',{headers:{Authorization:'Bearer '+finalSession.accessToken}})).status,401);
-  console.log('PASS sessions: revoke others, password change invalidation and server-side logout');
-
-  if (process.env.SMTP_TEST_TO) {
-    const realMail = new MailService();
-    mail.sendInvitation = realMail.sendInvitation.bind(realMail);
-    mail.sendReminder = realMail.sendReminder.bind(realMail);
-    people[0].email = process.env.SMTP_TEST_TO;
-    const value = await sentEnvelope(false, 1);
-    assert.equal(value.deliveries[0].delivered, true, JSON.stringify(value.deliveries));
-    await request(`/envelopes/${value.envelope.id}/recipients/${value.invitations[0].id}/remind`, {}, token);
-    await request(`/envelopes/${value.envelope.id}/cancel`, {}, token);
-    console.log('PASS live SMTP: invitation and reminder accepted; test envelope then cancelled');
+  const resetSession=await request('/auth/login',{email,password:newPassword});
+  await request('/auth/password-reset/request',{email});
+  const resetCode=new URL(resetUrl).searchParams.get('reset');
+  await request('/auth/password-reset/confirm',{token:resetCode,password:'Restored-'+randomUUID()});
+  assert.equal((await fetch(base+'/auth/me',{headers:{Authorization:'Bearer '+resetSession.accessToken}})).status,401);
+  assert.equal((await fetch(base+'/auth/password-reset/confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:resetCode,password:'Rejected-'+randomUUID()})})).status,401);
+  console.log('PASS sessions: revocation, password change/reset, single-use reset and logout');
+  let limited=false;
+  for(let index=0;index<21;index++){
+    const attempt=await fetch(base+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'rate-limit@example.test',password:'wrong-password'})});
+    if(attempt.status===429){limited=true;assert.ok(attempt.headers.has('retry-after'));break;}
   }
+  assert.ok(limited);console.log('PASS authentication: HTTP throttling and retry-after');
+
+
 } finally {
   if (app) await app.close();
   // Only the random test schema created above can be removed here.

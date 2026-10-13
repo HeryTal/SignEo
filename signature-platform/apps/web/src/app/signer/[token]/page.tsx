@@ -4,9 +4,9 @@ import { InvitationContent, brandStyles, type Brand } from "../../ui/branded-inv
 import Image from "next/image";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { FormEvent, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { FormEvent, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useParams } from "next/navigation";
-import { SigneoLogo } from "../../ui/signeo-logo";
+import { SigneoMark } from "../../ui/signeo-logo";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const PdfPages = dynamic(() => import("../../ui/pdf-pages"), {
@@ -251,7 +251,7 @@ export default function SignerPage() {
     <main className="signer-shell" style={brandStyles(invitation?.envelope.branding??{})}>
       <header className="signer-header" style={{ borderBottomColor: invitation?.envelope.branding?.accentColor || undefined }}>
         <Link href="/" className="brand">
-          {invitation?.envelope.branding?.logoUrl ? <><img className="signer-logo" src={invitation.envelope.branding.logoUrl} alt="" />{invitation.envelope.branding.displayName || "Signeo.it"}</> : <><SigneoLogo />{invitation?.envelope.branding?.displayName && invitation.envelope.branding.displayName !== "Signeo" && <span>{invitation.envelope.branding.displayName}</span>}</>}
+          {invitation?.envelope.branding?.logoUrl ? <><img className="signer-logo" src={invitation.envelope.branding.logoUrl} alt="" />{invitation.envelope.branding.displayName || "Signeo.it"}</> : <><SigneoMark /><span>{invitation?.envelope.branding?.displayName || "Signeo.it"}</span></>}
         </Link>
         <span>
           {isApprover ? "Approbation sécurisée" : "Signature sécurisée"}

@@ -18,8 +18,8 @@ export class AuthController {
   @Post('signup')
   @UseGuards(AuthRateGuard)
   signup(@Body() body: SignupBody) {
-    if (!body.name?.trim() || !body.email?.trim() || !body.password || body.password.length < 8) {
-      throw new BadRequestException('Nom, e-mail et mot de passe de 8 caractères minimum requis.');
+    if (typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 120 || typeof body.email !== 'string' || body.email.length > 255 || !/^\S+@\S+\.\S+$/.test(body.email.trim()) || typeof body.password !== 'string' || body.password.length < 12 || Buffer.byteLength(body.password,'utf8') > 72) {
+      throw new BadRequestException('Nom, e-mail valide et mot de passe de 12 caractères minimum (72 octets maximum) requis.');
     }
     return this.auth.signup(body.name, body.email, body.password);
   }
@@ -27,7 +27,7 @@ export class AuthController {
   @Post('login')
   @UseGuards(AuthRateGuard)
   login(@Body() body: LoginBody) {
-    if (!body.email?.trim() || !body.password) {
+    if (typeof body.email !== 'string' || !body.email.trim() || body.email.length > 255 || typeof body.password !== 'string' || !body.password || Buffer.byteLength(body.password,'utf8') > 72) {
       throw new BadRequestException('E-mail et mot de passe requis.');
     }
     return this.auth.login(body.email, body.password);
@@ -36,15 +36,15 @@ export class AuthController {
   @Post('password-reset/request')
   @UseGuards(AuthRateGuard)
   requestPasswordReset(@Body() body: PasswordResetBody) {
-    if (!body.email?.trim()) throw new BadRequestException('Adresse e-mail requise.');
+    if (typeof body.email !== 'string' || !/^\S+@\S+\.\S+$/.test(body.email.trim()) || body.email.length > 255) throw new BadRequestException('Adresse e-mail requise.');
     return this.auth.requestPasswordReset(body.email, process.env.WEB_ORIGIN ?? 'http://localhost:3000');
   }
 
   @Post('password-reset/confirm')
   @UseGuards(AuthRateGuard)
   confirmPasswordReset(@Body() body: { token?: string; password?: string }) {
-    if (!body.token || !body.password || body.password.length < 8) {
-      throw new BadRequestException('Un lien valide et un mot de passe de 8 caractères minimum sont requis.');
+    if (typeof body.token !== 'string' || !body.token || typeof body.password !== 'string' || body.password.length < 12 || Buffer.byteLength(body.password,'utf8') > 72) {
+      throw new BadRequestException('Un lien valide et un mot de passe de 12 caractères minimum (72 octets maximum) sont requis.');
     }
     return this.auth.resetPassword(body.token, body.password);
   }

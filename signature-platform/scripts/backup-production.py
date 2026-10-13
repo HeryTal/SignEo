@@ -1,9 +1,11 @@
 """Quiesced backup of the production Compose stack. Never prints credentials."""
+import os
 import argparse, datetime, hashlib, json, pathlib, subprocess
 parser=argparse.ArgumentParser()
 parser.add_argument('--destination',required=True)
 parser.add_argument('--env-file',default='.env.production')
 args=parser.parse_args()
+os.environ["API_ENV_FILE"]=str(pathlib.Path(args.env_file).resolve())
 target=pathlib.Path(args.destination).resolve()/datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
 target.mkdir(parents=True,exist_ok=False)
 base=['docker','compose','--env-file',args.env_file,'-f','compose.production.yml']

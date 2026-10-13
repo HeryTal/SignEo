@@ -1127,7 +1127,7 @@ export class EnvelopesService {
       await this.lockInvitationEnvelope(manager, token);
       const recipient = await manager.getRepository(Recipient).findOne({
         where: { accessToken: token },
-        relations: { envelope: { recipients: true, documents: true } },
+        relations: { envelope: { recipients: true, documents: true, workspace: true } },
       });
       if (recipient && await this.expireEnvelopeIfPast(recipient.envelope, manager)) {
         throw new BadRequestException('Cette invitation a expiré.');

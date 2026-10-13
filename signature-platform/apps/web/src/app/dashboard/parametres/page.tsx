@@ -136,19 +136,17 @@ export default function SettingsPage() {
   const [billingEmail, setBillingEmail] = useState("");
   useEffect(() => {
     const token = localStorage.getItem("signeo_access_token");
-    if (!token) {
-      setLoading(false);
-      setLoadError(true);
-      return;
-    }
-    Promise.all([
+    Promise.resolve().then(() => {
+      if (!token) throw new Error("Session unavailable");
+      return Promise.all([
       fetch(`${API}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       }),
       fetch(`${API}/billing`, {
         headers: { Authorization: `Bearer ${token}` },
       }),
-    ])
+    ]);
+    })
       .then(async ([profileResponse, billingResponse]) => {
         if (profileResponse.ok) {
           const profile = await profileResponse.json();
@@ -171,11 +169,12 @@ export default function SettingsPage() {
           setBillingEmail(value.billingEmail ?? "");
         }
       })
-      .catch(() =>
+      .catch(() => {
+        setLoadError(true);
         setNotice(
           "Impossible de charger les paramètres. Vérifiez que l’API est démarrée.",
-        ),
-      )
+        );
+      })
       .finally(() => setLoading(false));
   }, []);
   async function save(event: FormEvent) {
@@ -421,7 +420,7 @@ export default function SettingsPage() {
                 id: "billing",
                 icon: "card",
                 label: "Facturation & abonnement",
-                detail: "03",
+                detail: "04",
               },
             ] as const
           ).map((tab) => (
@@ -1145,8 +1144,8 @@ export default function SettingsPage() {
 function BrandLogo({ url }: { url: string }) {
   const [failedUrl, setFailedUrl] = useState("");
   // Remote organization logos cannot be enumerated in Next's image configuration.
-  // eslint-disable-next-line @next/next/no-img-element
   return url && failedUrl !== url ? (
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       src={url}
       alt="Logo de votre organisation"

@@ -52,8 +52,9 @@ export class AuthService {
     const token = randomBytes(32).toString('base64url');
     user.passwordResetTokenHash = createHash('sha256').update(token).digest('hex');
     user.passwordResetExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
-    await this.users.save(user);
-    await this.mail.sendPasswordReset(user.email, user.name, `${webOrigin}/connexion?reset=${encodeURIComponent(token)}`);
+    await this.users.update(user.id,{passwordResetTokenHash:user.passwordResetTokenHash,passwordResetExpiresAt:user.passwordResetExpiresAt});
+    try { await this.mail.sendPasswordReset(user.email, user.name, `${webOrigin}/connexion?reset=${encodeURIComponent(token)}`); }
+    catch { /* Keep the same public response regardless of account or mail delivery state. */ }
     return { accepted: true };
   }
 
@@ -126,7 +127,7 @@ export class AuthService {
     const user = await this.users.findOne({ where: { id } });
     if (!user) throw new UnauthorizedException('Utilisateur introuvable.');
     user.branding = this.normalizeBranding(branding);
-    await this.users.save(user);
+    await this.users.update(id,{branding:user.branding});
     return { branding: user.branding };
   }
 

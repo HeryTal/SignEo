@@ -1,5 +1,6 @@
 "use client";
 
+import {apiRequest} from "@/app/ui/api-client";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
@@ -102,6 +103,9 @@ export default function NewEnvelopePage() {
   const [fieldDraft, setFieldDraft] = useState<PlacedField | null>(null);
   const [collecting, setCollecting] = useState(false);
   const [fields, setFields] = useState<PlacedField[]>([]);
+  const [addressBook,setAddressBook]=useState<{id:string;name:string;email:string}[]>([]);
+  const [contactsError,setContactsError]=useState("");
+  useEffect(()=>{let active=true;apiRequest<{items:{id:string;name:string;email:string}[]}>("/contacts").then(value=>{if(active)setAddressBook(value.items);}).catch(()=>{if(active)setContactsError("Le carnet est indisponible. Vous pouvez saisir les destinataires manuellement.");});return()=>{active=false;};},[]);
   const [styleDefaults, setStyleDefaults] = useState<StyleDefaults>({ textFont: "SANS", signatureFont: "SCRIPT", textColor: "#24352b", signatureColor: "#315b45", textSize: 11, signatureSize: 22 });
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [placingType, setPlacingType] = useState<FieldType | null>(null);
@@ -861,6 +865,8 @@ export default function NewEnvelopePage() {
                 return <details key={recipient.id} className={`preparation-recipient recipient-color-${index % 2}`} open={recipient.id === selectedRecipientId || role === "APPROVER"}>
                   <summary><span className="recipient-avatar">{recipient.name.split(" ").map((part) => part[0]).join("").slice(0, 2) || index + 1}</span>{recipient.name || (role === "SIGNER" ? "Nouveau signataire" : "Nouvel approbateur")} <em>{fields.filter((field) => field.recipientId === recipient.id).length}</em></summary>
                   <div className="preparation-recipient-form">
+                    {addressBook.length>0&&<label className="form-field">Choisir dans les contacts<select value="" onChange={event=>{const contact=addressBook.find(item=>item.id===event.target.value);if(contact)setRecipients(items=>items.map(item=>item.id===recipient.id?{...item,name:contact.name,email:contact.email}:item));}}><option value="">Sélectionner un contact</option>{addressBook.map(contact=><option key={contact.id} value={contact.id}>{contact.name} · {contact.email}</option>)}</select></label>}
+                    {contactsError&&<small>{contactsError}</small>}
                     <label className="form-field">Nom<input value={recipient.name} maxLength={120} onChange={(event) => updateRecipient(index, "name", event.target.value)} /></label>
                     <label className="form-field">E-mail<input type="email" value={recipient.email} onChange={(event) => updateRecipient(index, "email", event.target.value)} /></label>
                     <div className="recipient-inline-actions">{signingMode !== "SIMULTANEOUS" && <><span>Position {index + 1}</span><button type="button" disabled={index === 0} aria-label="Monter le destinataire" onClick={() => reorderRecipient(index, -1)}>↑</button><button type="button" disabled={index === recipients.length - 1} aria-label="Descendre le destinataire" onClick={() => reorderRecipient(index, 1)}>↓</button></>}<button type="button" onClick={() => removeRecipient(recipient.id)}>Supprimer</button></div>

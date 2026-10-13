@@ -65,7 +65,7 @@ Le forfait est déterminé par le tarif Stripe réellement souscrit, à chaque n
 
 La vérification d’identité expose son état dans `GET /auth/me` et démarre via `POST /auth/identity-verification`. Avec Stripe Identity, définissez `IDENTITY_VERIFICATION_PROVIDER=stripe`, `STRIPE_SECRET_KEY` et `STRIPE_IDENTITY_WEBHOOK_SECRET`, puis configurez l’endpoint `POST /auth/identity-verification/stripe-webhook` dans Stripe : l’application crée une VerificationSession par utilisateur et n’enregistre `VERIFIED` qu’après le webhook Stripe signé. Les fournisseurs génériques peuvent utiliser `POST /auth/identity-verification/callback` avec les variables `IDENTITY_VERIFICATION_*`. L’adresse e-mail ou le consentement ne sont jamais présentés comme une vérification d’identité.
 
-En développement, TypeORM synchronise les entités au démarrage. En production, `synchronize` reste désactivé. La migration `EnvelopeTemplates1791676800000` ajoute les modèles à une base qui possède déjà les tables de l’application (`users`, `workspaces`, etc.). Elle ne constitue pas une migration initiale de tout le produit.
+En développement, TypeORM synchronise les entités sauf si `DATABASE_SYNCHRONIZE=false`. En production, la synchronisation reste désactivée. Les quatre migrations comprennent désormais le schéma initial complet, les modèles, les organisations et les ajouts de préparation à la production. Le test d’intégration vérifie une base neuve et une mise à niveau conservant les utilisateurs.
 
 Avant de démarrer la nouvelle version en production, sauvegardez la base, configurez les variables `DATABASE_*` de l’environnement cible, puis exécutez :
 
@@ -86,3 +86,9 @@ npm.cmd run test:integration --workspace api
 Ce test utilise la connexion PostgreSQL configurée, crée un schéma aléatoire `workflow_test_*` et le supprime à la fin. Il ne modifie pas les comptes ni les enveloppes existants. Il vérifie la migration, le parcours HTTP authentifié, les rappels, les invitations séquentielles et les signatures concurrentes avec l’annulation. Les e-mails sont simulés par défaut.
 
 Pour tester aussi l’envoi SMTP réel, définissez `SMTP_TEST_TO` avec une adresse de test que vous contrôlez. Deux messages seront envoyés (invitation et rappel), puis l’enveloppe de test sera annulée et supprimée avec son schéma. Les liens de ces messages sont temporaires et locaux. L’acceptation SMTP ne garantit pas la réception en boîte principale.
+
+## Préparation à la production
+
+Consultez [le guide de déploiement et restauration](docs/PRODUCTION.md) et [le bilan des vérifications et limites](docs/VERIFICATION.md). Les pages légales restent préparatoires et les prestataires doivent être testés dans l’environnement cible.
+
+Les paramètres de marque sont copiés dans chaque nouvelle enveloppe et utilisés dans l’accueil du signataire et les e-mails. Les contacts, sessions révoquables et livraisons webhook persistantes disposent de leurs écrans de gestion.

@@ -8,3 +8,9 @@ apps/api/uploads/
 **/.next/
 *.tsbuildinfo
 *.log
+backups/
+**/test-results/
+**/playwright-report/
+**/__pycache__/
+*.p12
+*.key

@@ -3,6 +3,9 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: signature-platform
     services:
       postgres:
         image: postgres:17-alpine
@@ -20,6 +23,7 @@ jobs:
       DATABASE_USER: signeo
       DATABASE_PASSWORD: ci-only-password
       DATABASE_NAME: signeo
+      NEXT_PUBLIC_API_URL: http://localhost:3001
       JWT_SECRET: ci-only-secret-never-use-in-production
     steps:
       - uses: actions/checkout@v4
@@ -27,8 +31,18 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: signature-platform/package-lock.json
       - run: npm ci
       - run: npm run test:api
       - run: npm run test:e2e
       - run: npm run test:integration --workspace api
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+        working-directory: signature-platform/apps/web
+      - run: npm run test:browser --workspace web
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-results
+          path: signature-platform/apps/web/test-results
+          retention-days: 7
